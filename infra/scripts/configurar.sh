@@ -19,6 +19,8 @@ VARIAVEIS=(
   "SITE_URL|n|Endereço do site, ex.: https://sc.hayahtraining.com"
   "SUPABASE_URL|n|Supabase > Project Settings > Data API > Project URL"
   "SUPABASE_PUBLISHABLE_KEY|n|Supabase > Project Settings > API Keys > Publishable key (começa com sb_publishable_)"
+  "SUPABASE_SECRET_KEY|s|Supabase > Project Settings > API Keys > Secret keys (começa com sb_secret_). Chave mestra: só aqui no servidor."
+  "GEMINI_API_KEY|s|Google AI Studio (aistudio.google.com) > Get API key. Com pagamento ativado e teto de gastos."
 )
 
 valor_atual() { grep -E "^$1=" "$ARQUIVO" | tail -1 | cut -d= -f2- || true; }
