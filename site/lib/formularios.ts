@@ -4,6 +4,8 @@ export type EstadoFormulario = {
   erro?: string;
   sucesso?: string;
   valores?: Record<string, string>;
+  /** Mostrar o botão "reenviar e-mail de confirmação" */
+  reenviar?: boolean;
 };
 
 export const ESTADO_INICIAL: EstadoFormulario = {};
