@@ -1,0 +1,10 @@
+# Segredos: NUNCA vão para o Git
+.env
+.env.*
+!.env.example
+
+node_modules/
+.next/
+dist/
+*.log
+backups/
