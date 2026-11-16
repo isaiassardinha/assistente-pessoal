@@ -19,6 +19,9 @@ export async function pedirNovaSenha(_anterior: EstadoFormulario, formulario: Fo
     if (error.status === 429) {
       return { erro: "Muitos pedidos seguidos. Espere alguns minutos e tente de novo.", valores: { email } };
     }
+    if (error.status === 504 || error.code === "request_timeout") {
+      return { erro: "Não conseguimos enviar o e-mail agora. Tente de novo em alguns minutos.", valores: { email } };
+    }
   }
   // Mesma resposta para qualquer e-mail (não revela quem tem conta).
   return {

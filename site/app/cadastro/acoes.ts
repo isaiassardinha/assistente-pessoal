@@ -39,6 +39,9 @@ export async function cadastrar(_anterior: EstadoFormulario, formulario: FormDat
     if (error.code === "over_email_send_rate_limit" || error.status === 429) {
       return { erro: "Muitas tentativas seguidas. Espere alguns minutos e tente de novo.", valores };
     }
+    if (error.status === 504 || error.code === "request_timeout") {
+      return { erro: "Não conseguimos enviar o e-mail de confirmação agora. Tente de novo em alguns minutos.", valores };
+    }
     if (error.code === "signup_disabled") {
       return { erro: "Os cadastros estão fechados no momento.", valores };
     }

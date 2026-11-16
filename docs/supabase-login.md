@@ -14,7 +14,7 @@ Tudo no painel do Supabase, projeto **Assistente Pessoal**, menu **Authenticatio
 **Authentication → Sign In / Providers → Email**
 - **Enable Email provider:** ligado
 - **Confirm email:** ligado
-- **Minimum password length:** `8`
+- **Minimum password length:** `8` (se o campo existir; o site já exige 8 de qualquer forma)
 - **Secure email change:** ligado
 
 **Authentication → Multi-Factor**
@@ -30,13 +30,13 @@ verificado no Resend:
    - **Sender email:** `naoresponda@sc.hayahtraining.com`
    - **Sender name:** `Assistente Pessoal`
    - **Host:** `smtp.resend.com`
-   - **Port:** `465`
+   - **Port:** `587` (a 465 não funcionou com o Supabase)
    - **Username:** `resend`
    - **Password:** a chave `re_...`
    - Salve.
 
 ## 4. Textos dos e-mails
-**Authentication → Emails → Templates**
+**Authentication → Emails → Templates** (só fica editável depois do SMTP próprio, seção 3)
 
 ### Confirm signup
 **Subject:** `Confirme seu cadastro no Assistente Pessoal`
