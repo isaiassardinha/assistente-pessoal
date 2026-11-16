@@ -7,7 +7,12 @@ type Item = { href: string; rotulo: string };
 /** Menu do topo. No celular vira um botão "Menu" que abre a lista
  *  (feito com <details>, sem precisar de JavaScript). */
 export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
-  const itens: Item[] = [{ href: "/painel", rotulo: "Painel" }];
+  const itens: Item[] = [
+    { href: "/painel", rotulo: "Painel" },
+    { href: "/painel/despesas", rotulo: "Despesas" },
+    { href: "/painel/tarefas", rotulo: "Tarefas" },
+    { href: "/painel/lembretes", rotulo: "Lembretes" },
+  ];
   if (admin) itens.push({ href: "/admin", rotulo: "Administração" });
 
   const links = itens.map((i) => (
@@ -30,13 +35,13 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
           Assistente Pessoal
         </Link>
 
-        <nav className="hidden items-center gap-1 sm:flex">
+        <nav className="hidden items-center gap-1 md:flex">
           {links}
           <span className="mx-2 text-sm text-zinc-500">{nome}</span>
           {botaoSair}
         </nav>
 
-        <details className="relative sm:hidden">
+        <details className="relative md:hidden">
           <summary className="cursor-pointer list-none rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium">
             Menu
           </summary>

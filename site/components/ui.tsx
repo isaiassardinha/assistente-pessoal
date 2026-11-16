@@ -62,3 +62,53 @@ export function LinkBotao({ href, children, variante = "principal" }: { href: st
     </Link>
   );
 }
+
+type SelecaoProps = ComponentProps<"select"> & {
+  rotulo: string;
+  opcoes: { valor: string; rotulo: string }[];
+  vazia?: string;
+};
+
+export function Selecao({ rotulo, opcoes, vazia, id, name, ...resto }: SelecaoProps) {
+  const idCampo = id ?? name;
+  return (
+    <div className="space-y-1">
+      <label htmlFor={idCampo} className="block text-sm font-medium text-zinc-800">
+        {rotulo}
+      </label>
+      <select
+        id={idCampo}
+        name={name}
+        className="block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-base text-zinc-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
+        {...resto}
+      >
+        {vazia !== undefined ? <option value="">{vazia}</option> : null}
+        {opcoes.map((o) => (
+          <option key={o.valor} value={o.valor}>
+            {o.rotulo}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+export function Secao({ titulo, descricao, children }: { titulo: string; descricao?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6">
+      <h2 className="text-lg font-semibold text-zinc-900">{titulo}</h2>
+      {descricao ? <div className="mt-1 text-sm text-zinc-600">{descricao}</div> : null}
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+/** Caixa que abre e fecha (sem JavaScript), usada para editar itens. */
+export function Abrir({ rotulo, children }: { rotulo: string; children: ReactNode }) {
+  return (
+    <details className="group">
+      <summary className="cursor-pointer list-none text-sm font-medium text-emerald-700 hover:underline">{rotulo}</summary>
+      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">{children}</div>
+    </details>
+  );
+}
