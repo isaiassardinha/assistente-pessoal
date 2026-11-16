@@ -87,6 +87,7 @@ chmod 640 /etc/assistente/site.env
 
 passo "Serviços (systemd) e Caddy"
 install -m 755 "$REPO/infra/scripts/publicar.sh" /usr/local/sbin/assistente-publicar
+install -m 755 "$REPO/infra/scripts/configurar.sh" /usr/local/sbin/assistente-configurar
 install -m 644 "$REPO"/infra/systemd/*.service "$REPO"/infra/systemd/*.timer /etc/systemd/system/
 sed "s/__DOMINIO__/$DOMINIO/g" "$REPO/infra/caddy/Caddyfile.modelo" > /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
@@ -98,6 +99,9 @@ systemctl reload-or-restart caddy
 passo "Primeira publicação do site (alguns minutos)"
 /usr/local/sbin/assistente-publicar --forcar
 systemctl enable --now assistente-publicar.timer >/dev/null
+
+passo "Configurações do sistema (chaves do Supabase etc.)"
+/usr/local/sbin/assistente-configurar
 
 echo
 echo "================================================================"

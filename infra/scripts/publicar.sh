@@ -50,8 +50,8 @@ echo "$NOVA" | como tee "$DESTINO/site/.versao" >/dev/null
 
 # ---- construir o site ------------------------------------------------
 if ! como bash -c "cd '$DESTINO/site' && npm ci --no-audit --no-fund --loglevel=error \
-      && set -a && . /etc/assistente/site.env && set +a && npm run build"; then
-  log "ERRO ao construir a versão ${NOVA:0:7}. A versão no ar NÃO foi alterada."
+      && npm test && set -a && . /etc/assistente/site.env && set +a && npm run build"; then
+  log "ERRO ao testar/construir a versão ${NOVA:0:7}. A versão no ar NÃO foi alterada."
   echo "$NOVA" > "$ESTADO/versao-com-erro"
   rm -rf "$DESTINO"
   exit 1
@@ -92,6 +92,7 @@ if [ "$no_ar" = 1 ]; then
   rm -f "$ESTADO/versao-com-erro"
   date -Iseconds > "$ESTADO/publicada-em"
   install -m 755 "$DESTINO/infra/scripts/publicar.sh" /usr/local/sbin/assistente-publicar
+  install -m 755 "$DESTINO/infra/scripts/configurar.sh" /usr/local/sbin/assistente-configurar
   # guarda só as 3 versões mais recentes
   ls -1dt "$VERSOES"/*/ 2>/dev/null | tail -n +4 | while read -r velha; do
     [ "$(readlink -f "$velha")" = "$(readlink -f "$ATUAL")" ] || rm -rf "$velha"

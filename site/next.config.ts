@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Todas as páginas são geradas na hora (necessário para a proteção CSP com
+  // "nonce" e para o login). Para um site pessoal isso não pesa.
+  poweredByHeader: false,
   turbopack: {
     rules: {
       "*.css": {

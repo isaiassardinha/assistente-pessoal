@@ -35,7 +35,8 @@ em *Key*. **Não** marque *Allow write access* (o servidor só lê). Clique em *
 runuser -u assistente -- git clone git@github.com:isaiassardinha/assistente-pessoal.git /home/assistente/app && bash /home/assistente/app/infra/scripts/instalar.sh
 ```
 
-Leva uns 5 a 10 minutos. Termina com a mensagem **PRONTO. Servidor instalado.**
+Leva uns 5 a 10 minutos. No final, ele pergunta as configurações (endereço do
+Supabase e chave pública) e termina com **PRONTO. Servidor instalado.**
 
 ---
 
@@ -65,10 +66,16 @@ cat /var/lib/assistente/versao-com-erro 2>/dev/null # versão que falhou (se hou
 
 ## 4. Senhas e chaves do sistema
 
-Ficam em `/etc/assistente/` no servidor, **nunca** no GitHub.
+Ficam em `/etc/assistente/site.env` no servidor, **nunca** no GitHub.
 O modelo do que precisa existir está em `.env.example` na raiz do projeto.
-Para editar: `nano /etc/assistente/site.env`, salvar com Ctrl+O, sair com Ctrl+X,
-e depois `assistente-publicar --forcar`.
+
+```bash
+assistente-configurar                            # pergunta o que estiver faltando
+assistente-configurar SUPABASE_PUBLISHABLE_KEY   # troca uma configuração
+```
+
+Cada pergunta diz onde achar o valor. As chaves secretas não aparecem na tela
+enquanto você cola.
 
 ## 5. Reconectar o WhatsApp
 
