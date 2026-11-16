@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# =====================================================================
+# Publica a versão mais nova do GitHub (ramo main) no servidor.
+#
+# Roda sozinho a cada 2 minutos (assistente-publicar.timer) e não faz
+# nada se não houver versão nova. Para forçar: assistente-publicar --forcar
+#
+# Segurança da publicação:
+#   - cada versão é montada numa pasta própria (versoes/<código>)
+#   - só troca a versão no ar se a construção der certo
+#   - depois de trocar, confere se o site respondeu com a versão nova;
+#     se não respondeu, VOLTA para a versão anterior sozinho
+# =====================================================================
+set -euo pipefail
+
+USUARIO=assistente
+CASA=/home/$USUARIO
+REPO=$CASA/app
+VERSOES=$CASA/versoes
+ATUAL=$CASA/atual
+ESTADO=/var/lib/assistente
+FORCAR="${1:-}"
+
+[ "$(id -u)" = 0 ] || { echo "Rode como root."; exit 1; }
+
+# nunca duas publicações ao mesmo tempo
+exec 9>/run/assistente-publicar.lock
+flock -n 9 || { echo "Outra publicação já está em andamento."; exit 0; }
+
+log() { echo "[$(date '+%F %T')] $*"; }
+como() { runuser -u "$USUARIO" -- "$@"; }
+
+mkdir -p "$ESTADO"
+como git -C "$REPO" fetch -q origin main
+NOVA="$(como git -C "$REPO" rev-parse origin/main)"
+NO_AR="$(cat "$ESTADO/versao-no-ar" 2>/dev/null || true)"
+COM_ERRO="$(cat "$ESTADO/versao-com-erro" 2>/dev/null || true)"
+
+if [ "$FORCAR" != "--forcar" ]; then
+  [ "$NOVA" = "$NO_AR" ] && exit 0          # nada novo
+  [ "$NOVA" = "$COM_ERRO" ] && exit 0       # essa já deu erro; só tenta de novo com --forcar
+fi
+
+log "Publicando a versão ${NOVA:0:7}"
+DESTINO="$VERSOES/$NOVA"
+rm -rf "$DESTINO"
+como mkdir -p "$DESTINO"
+como bash -c "git -C '$REPO' archive '$NOVA' | tar -x -C '$DESTINO'"
+echo "$NOVA" | como tee "$DESTINO/site/.versao" >/dev/null
+
+# ---- construir o site ------------------------------------------------
+if ! como bash -c "cd '$DESTINO/site' && npm ci --no-audit --no-fund --loglevel=error \
+      && set -a && . /etc/assistente/site.env && set +a && npm run build"; then
+  log "ERRO ao construir a versão ${NOVA:0:7}. A versão no ar NÃO foi alterada."
+  echo "$NOVA" > "$ESTADO/versao-com-erro"
+  rm -rf "$DESTINO"
+  exit 1
+fi
+
+# ---- atualizar configurações do servidor que vêm com a versão --------
+install -m 644 "$DESTINO"/infra/systemd/*.service "$DESTINO"/infra/systemd/*.timer /etc/systemd/system/
+systemctl daemon-reload
+
+DOMINIO="$(cat /etc/assistente/dominio)"
+sed "s/__DOMINIO__/$DOMINIO/g" "$DESTINO/infra/caddy/Caddyfile.modelo" > /tmp/Caddyfile.novo
+if ! cmp -s /tmp/Caddyfile.novo /etc/caddy/Caddyfile; then
+  if caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile >/dev/null 2>&1; then
+    install -m 644 /tmp/Caddyfile.novo /etc/caddy/Caddyfile
+    systemctl reload caddy 9>&-
+    log "Configuração do Caddy atualizada"
+  else
+    log "AVISO: Caddyfile novo é inválido; mantive o anterior"
+  fi
+fi
+
+# ---- trocar a versão no ar --------------------------------------------
+ANTERIOR=""
+[ -L "$ATUAL" ] && ANTERIOR="$(readlink -f "$ATUAL")"
+ln -sfn "$DESTINO" "$ATUAL.novo" && mv -Tf "$ATUAL.novo" "$ATUAL"
+systemctl restart assistente-site 9>&-
+
+no_ar=0
+for _ in $(seq 1 40); do
+  if curl -fsS --max-time 3 http://127.0.0.1:3000/api/saude 2>/dev/null | grep -q "$NOVA"; then
+    no_ar=1; break
+  fi
+  sleep 1
+done
+
+if [ "$no_ar" = 1 ]; then
+  echo "$NOVA" > "$ESTADO/versao-no-ar"
+  rm -f "$ESTADO/versao-com-erro"
+  date -Iseconds > "$ESTADO/publicada-em"
+  install -m 755 "$DESTINO/infra/scripts/publicar.sh" /usr/local/sbin/assistente-publicar
+  # guarda só as 3 versões mais recentes
+  ls -1dt "$VERSOES"/*/ 2>/dev/null | tail -n +4 | while read -r velha; do
+    [ "$(readlink -f "$velha")" = "$(readlink -f "$ATUAL")" ] || rm -rf "$velha"
+  done
+  log "OK: versão ${NOVA:0:7} no ar"
+else
+  log "ERRO: a versão ${NOVA:0:7} não respondeu. Voltando para a anterior."
+  echo "$NOVA" > "$ESTADO/versao-com-erro"
+  if [ -n "$ANTERIOR" ] && [ -d "$ANTERIOR" ]; then
+    ln -sfn "$ANTERIOR" "$ATUAL.novo" && mv -Tf "$ATUAL.novo" "$ATUAL"
+    systemctl restart assistente-site 9>&-
+    log "Versão anterior restaurada"
+  fi
+  rm -rf "$DESTINO"
+  exit 1
+fi

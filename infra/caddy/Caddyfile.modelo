@@ -1,0 +1,24 @@
+# Caddy: recebe as visitas da internet, cuida do HTTPS (certificado automático)
+# e repassa para o site, que roda só dentro do servidor (127.0.0.1:3000).
+# __DOMINIO__ é trocado pelo endereço real na instalação.
+
+__DOMINIO__ {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+		-X-Powered-By
+	}
+
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy 127.0.0.1:3000
+}

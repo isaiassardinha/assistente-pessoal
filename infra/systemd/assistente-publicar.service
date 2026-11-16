@@ -1,0 +1,9 @@
+[Unit]
+Description=Assistente Pessoal - publica a versão nova do GitHub, se houver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/assistente-publicar
+TimeoutStartSec=20min

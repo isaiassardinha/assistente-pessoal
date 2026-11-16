@@ -1,0 +1,20 @@
+[Unit]
+Description=Assistente Pessoal - site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=assistente
+Group=assistente
+WorkingDirectory=/home/assistente/atual/site
+EnvironmentFile=/etc/assistente/site.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
