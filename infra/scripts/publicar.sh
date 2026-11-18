@@ -41,9 +41,24 @@ if [ "$FORCAR" != "--forcar" ]; then
   [ "$NOVA" = "$COM_ERRO" ] && exit 0       # essa já deu erro; só tenta de novo com --forcar
 fi
 
+# Se a versão nova traz um script de publicação diferente, usa o NOVO
+# (senão mudanças na publicação só valeriam na versão seguinte).
+if [ -z "${PUBLICAR_SCRIPT_NOVO:-}" ]; then
+  script_novo="$(mktemp)"
+  como git -C "$REPO" show "$NOVA:infra/scripts/publicar.sh" > "$script_novo" 2>/dev/null || true
+  if [ -s "$script_novo" ] && ! cmp -s "$script_novo" "$0"; then
+    log "A versão nova traz um script de publicação atualizado; usando ele."
+    chmod 755 "$script_novo"
+    exec 9>&-
+    PUBLICAR_SCRIPT_NOVO=1 exec bash "$script_novo" "$@"
+  fi
+  rm -f "$script_novo"
+fi
+
 log "Publicando a versão ${NOVA:0:7}"
-DESTINO="$VERSOES/$NOVA"
-rm -rf "$DESTINO"
+# Pasta própria para cada tentativa (nunca apaga a versão que está no ar,
+# mesmo quando a mesma versão é publicada de novo com --forcar).
+DESTINO="$VERSOES/${NOVA}-$(date +%Y%m%d%H%M%S)"
 como mkdir -p "$DESTINO"
 como bash -c "git -C '$REPO' archive '$NOVA' | tar -x -C '$DESTINO'"
 echo "$NOVA" | como tee "$DESTINO/site/.versao" >/dev/null
@@ -61,6 +76,7 @@ como bash -c "cd '$DESTINO/site' && npm ci --no-audit --no-fund --loglevel=error
 if [ -d "$DESTINO/robo" ]; then
   como bash -c "cd '$DESTINO/robo' && npm ci --no-audit --no-fund --loglevel=error && npm test && npm run build" \
     || falhar_construcao "o robô"
+  [ -f "$DESTINO/robo/dist/index.js" ] || falhar_construcao "o robô (arquivo final não foi gerado)"
 fi
 
 # ---- senha interna entre o site e o robô, e pasta de dados do robô ----
