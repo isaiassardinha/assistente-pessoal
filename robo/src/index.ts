@@ -3,6 +3,7 @@
 import { mkdirSync } from "node:fs";
 import { config, configuracoesFaltando, versao } from "./config";
 import { receberMensagem } from "./conversa";
+import { iniciarAutoteste } from "./autoteste";
 import { iniciarApiInterna } from "./interno";
 import { log } from "./log";
 import { iniciarRotinas } from "./rotinas";
@@ -18,6 +19,7 @@ if (faltando.length > 0) {
 } else {
   iniciarWhatsApp(receberMensagem).catch((e) => log.erro("não consegui iniciar o WhatsApp:", (e as Error).message));
   iniciarRotinas();
+  iniciarAutoteste();
 }
 
 process.on("unhandledRejection", (e) => log.erro("erro não tratado:", (e as Error)?.message ?? e));

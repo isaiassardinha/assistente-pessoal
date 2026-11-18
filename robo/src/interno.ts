@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import * as banco from "./banco";
 import { config, configuracoesFaltando, versao } from "./config";
 import { log } from "./log";
+import { resultadoAutoteste } from "./autoteste";
 import { buscar } from "./cerebro";
 import { IaIndisponivel, responderComFontes } from "./ia";
 import { gerarCodigo, hashCodigo, LimitadorPorMinuto, numeroPermitido } from "./regras";
@@ -112,7 +113,7 @@ export function iniciarApiInterna() {
 
       if (rota === "GET /saude") {
         const e = estadoWhatsApp();
-        return json(res, 200, { ok: true, versao: versao(), whatsapp: e.situacao, faltando: configuracoesFaltando() });
+        return json(res, 200, { ok: true, versao: versao(), whatsapp: e.situacao, faltando: configuracoesFaltando(), ia: resultadoAutoteste() });
       }
       if (!autorizado(req)) return json(res, 401, { ok: false, erro: "não autorizado" });
 

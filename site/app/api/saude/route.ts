@@ -15,11 +15,11 @@ export async function GET() {
   }
 
   // Situação do robô do WhatsApp (sem nenhum dado pessoal)
-  let robo: { versao?: string; whatsapp?: string } = {};
+  let robo: { versao?: string; whatsapp?: string; ia?: unknown } = {};
   try {
     const r = await fetch(`${process.env.ROBO_URL || "http://127.0.0.1:3001"}/saude`, { signal: AbortSignal.timeout(1500), cache: "no-store" });
-    const dados = (await r.json()) as { versao?: string; whatsapp?: string; faltando?: string[] };
-    robo = { versao: dados.versao, whatsapp: dados.faltando?.length ? "falta configurar" : dados.whatsapp };
+    const dados = (await r.json()) as { versao?: string; whatsapp?: string; faltando?: string[]; ia?: unknown };
+    robo = { versao: dados.versao, whatsapp: dados.faltando?.length ? "falta configurar" : dados.whatsapp, ia: dados.ia };
   } catch {
     robo = { whatsapp: "robô fora do ar" };
   }
