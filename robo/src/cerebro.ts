@@ -8,7 +8,7 @@ import { instanteParaLocal } from "@/lib/datas";
 import * as banco from "./banco";
 import { ArquivoGrandeDemais, gerarVetores, IaIndisponivel, lerArquivoComIA, MAXIMO_LEITURA_IA, resumir, type TrechoEncontrado } from "./ia";
 import { log } from "./log";
-import { pareceEscaneado, quebrarEmTrechos } from "./trechos";
+import { normalizarTexto, pareceEscaneado, quebrarEmTrechos } from "./trechos";
 
 /** Problema que não se resolve tentando de novo (mensagem vai para a pessoa). */
 export class ArquivoIlegivel extends Error {}
@@ -87,7 +87,7 @@ export async function processarDocumento(item: { id: string; usuario_id: string;
 
   try {
     const dados = await banco.baixarArquivo(uid, doc.caminho);
-    const texto = (await extrairTexto(dados, doc.tipo_mime ?? "")).trim();
+    const texto = normalizarTexto(await extrairTexto(dados, doc.tipo_mime ?? ""));
     if (texto.length < 3) throw new ArquivoIlegivel("Não encontrei nenhum texto ou conteúdo legível neste arquivo.");
 
     const trechos = quebrarEmTrechos(texto);

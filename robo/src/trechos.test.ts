@@ -37,6 +37,11 @@ describe("quebrar em trechos", () => {
     expect(trechos.length).toBe(MAXIMO_TRECHOS);
   });
 
+  it("tira caracteres que o banco não aceita (nulo, controle, emoji quebrado)", () => {
+    expect(normalizarTexto("Con\u0000trato\u0007 de\uD800 aluguel")).toBe("Con trato de aluguel");
+    expect(quebrarEmTrechos("a\u0000b".repeat(2000)).every((t) => !t.includes("\u0000"))).toBe(true);
+  });
+
   it("normaliza espaços e linhas", () => {
     expect(normalizarTexto("a \t b\r\n\n\n\nc")).toBe("a b\n\nc");
   });

@@ -6,12 +6,18 @@ export const MAXIMO_TRECHOS = 1500; // ~2 MB de texto por documento
 
 /** Limpa espaços repetidos e linhas vazias em excesso. */
 export function normalizarTexto(texto: string): string {
-  return texto
-    .replace(/\r\n?/g, "\n")
-    .replace(/[\t\f\v ]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    texto
+      // o banco não aceita o caractere nulo; PDFs às vezes trazem ele e outros de controle
+      .replace(/[\u0000-\u0008\u000B\u000E-\u001F\u007F]/g, " ")
+      // pedaços de emoji/caractere quebrados (sem par)
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\t\f\v ]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
 
 /**
