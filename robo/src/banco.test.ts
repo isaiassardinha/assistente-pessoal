@@ -21,6 +21,10 @@ const TABELAS_PESSOAIS = [
   "codigos_verificacao",
   "trechos",
   "contas",
+  "conexoes",
+  "emails",
+  "regras_email",
+  "avisos_agenda",
 ];
 
 // Funções que leem perfis/avisos pelo próprio servidor (não são dados de um usuário específico)
@@ -30,6 +34,9 @@ const EXCECOES = new Set([
   // é feito pelas funções seguintes, que recebem o dono)
   "anotacoesParaIndexar",
   "documentosParaProcessar",
+  "conexoesAtivas",
+  "perfisParaResumo",
+  "limparEmailsEAvisosAntigos",
 ]);
 
 const codigo = readFileSync(path.join(__dirname, "banco.ts"), "utf8");

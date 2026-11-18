@@ -80,3 +80,30 @@ export async function acordarCerebro(): Promise<void> {
     // sem problema: a rotina do robô pega no próximo minuto
   }
 }
+
+// ------------------------------------------------------------- e-mail e agenda
+
+export type ResultadoConexao = { ok: boolean; erro?: string };
+
+/** O robô testa a conexão e, se der certo, guarda a senha criptografada. */
+export async function conectarNoRobo(caminho: "/conexoes/gmail" | "/conexoes/agenda", corpo: Record<string, string>): Promise<ResultadoConexao> {
+  try {
+    const r = await chamar(caminho, "POST", corpo, 45_000);
+    return (await r.json()) as ResultadoConexao;
+  } catch {
+    return { ok: false, erro: "O robô está fora do ar agora. Tente de novo em instantes." };
+  }
+}
+
+export type CompromissoSite = { titulo: string; inicio: string; fim: string; diaInteiro: boolean; dia: string; local: string };
+
+/** Compromissos da agenda (null = agenda não conectada ou robô fora do ar). */
+export async function agendaDe(usuarioId: string, de: string, ate: string): Promise<CompromissoSite[] | null> {
+  try {
+    const r = await chamar(`/agenda?usuarioId=${usuarioId}&de=${de}&ate=${ate}`, "GET", undefined, 15_000);
+    const dados = (await r.json()) as { ok: boolean; conectada?: boolean; compromissos?: CompromissoSite[] };
+    return dados.ok && dados.conectada ? (dados.compromissos ?? []) : null;
+  } catch {
+    return null;
+  }
+}

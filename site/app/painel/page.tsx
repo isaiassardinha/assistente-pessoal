@@ -4,11 +4,16 @@ import { FormularioAcao } from "@/components/FormularioAcao";
 import { Abrir, Aviso, Campo, Secao } from "@/components/ui";
 import { exigirAprovado } from "@/lib/auth/sessao";
 import { situacaoDaConta } from "@/lib/contas";
-import { formatarDataHora, hojeISO, inicioDoMes, somarDias } from "@/lib/datas";
+import { formatarDataHora, hojeISO, horasAtras, inicioDoMes, somarDias } from "@/lib/datas";
 import { formatarReais, valorParaCampo } from "@/lib/dinheiro";
 import { classeLargura, situacaoDoOrcamento } from "@/lib/orcamento";
 import { formatarCelular } from "@/lib/validacao";
+import { agendaDe } from "@/lib/robo";
 import { definirLimite } from "./acoes";
+
+function horaDe(iso: string) {
+  return new Date(iso).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+}
 
 export const metadata: Metadata = { title: "Painel" };
 
@@ -34,7 +39,7 @@ const NOMES_MES = [
 ];
 
 export default async function Painel({ searchParams }: PageProps<"/painel">) {
-  const { supabase, perfil } = await exigirAprovado();
+  const { supabase, perfil, usuarioId } = await exigirAprovado();
   const { aviso } = await searchParams;
   const hoje = hojeISO();
   const inicio = inicioDoMes(hoje);
@@ -62,6 +67,18 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
       .limit(8),
     contarDocumentos(),
   ]);
+  const [agendaHoje, { data: emailsImportantes }, { data: conexoes }] = await Promise.all([
+    agendaDe(usuarioId, hoje, hoje),
+    supabase
+      .from("emails")
+      .select("id, recebido_em, remetente_nome, remetente_email, assunto, resumo, importancia")
+      .in("importancia", ["urgente", "importante"])
+      .gte("recebido_em", horasAtras(24))
+      .order("recebido_em", { ascending: false })
+      .limit(6),
+    supabase.from("conexoes").select("tipo"),
+  ]);
+  const temGmail = (conexoes ?? []).some((c) => c.tipo === "gmail");
 
   /** Contagens direto no banco (sem trazer as linhas). */
   async function contarDocumentos() {
@@ -172,6 +189,61 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
         </div>
 
         <div className="space-y-6">
+          <Secao titulo="Agenda de hoje">
+            {agendaHoje === null ? (
+              <p className="text-sm text-zinc-500">
+                Agenda não conectada.{" "}
+                <Link href="/painel/conta#agenda" className="font-medium text-emerald-700 hover:underline">
+                  Conectar
+                </Link>
+              </p>
+            ) : agendaHoje.length === 0 ? (
+              <p className="text-sm text-zinc-500">Nada marcado para hoje.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {agendaHoje.map((c) => (
+                  <li key={`${c.titulo}-${c.inicio}`} className="flex gap-3">
+                    <span className="w-24 shrink-0 text-zinc-500">{c.diaInteiro ? "dia todo" : `${horaDe(c.inicio)}–${horaDe(c.fim)}`}</span>
+                    <span className="text-zinc-900">
+                      {c.titulo}
+                      {c.local ? <span className="text-zinc-500"> · {c.local}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Secao>
+
+          <Secao titulo="E-mails importantes (24h)">
+            {!temGmail ? (
+              <p className="text-sm text-zinc-500">
+                E-mail não conectado.{" "}
+                <Link href="/painel/conta#gmail" className="font-medium text-emerald-700 hover:underline">
+                  Conectar
+                </Link>
+              </p>
+            ) : (emailsImportantes ?? []).length === 0 ? (
+              <p className="text-sm text-zinc-500">Nada importante nas últimas 24 horas.</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {(emailsImportantes ?? []).map((e) => (
+                  <li key={e.id}>
+                    <p className="text-zinc-900">
+                      {e.importancia === "urgente" ? <span className="mr-1 text-red-700">●</span> : null}
+                      <strong>{e.remetente_nome || e.remetente_email}</strong> · {e.assunto}
+                    </p>
+                    {e.resumo ? <p className="text-zinc-600">{e.resumo}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {temGmail ? (
+              <Link href="/painel/emails" className="mt-3 inline-block text-sm font-medium text-emerald-700 hover:underline">
+                Ver todos os e-mails →
+              </Link>
+            ) : null}
+          </Secao>
+
           <Secao titulo="Contas a pagar">
             <ul className="space-y-2">
               {(contasProximas ?? []).length === 0 ? <li className="text-sm text-zinc-500">Nada vencendo nos próximos 7 dias.</li> : null}

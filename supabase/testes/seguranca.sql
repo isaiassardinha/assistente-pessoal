@@ -709,6 +709,69 @@ select testes.deve_bloquear('select * from public.uso_ia', 'visitante não vê c
 select testes.como_dono_do_banco();
 
 -- ---------------------------------------------------------------------
+-- 10f. E-MAIL E AGENDA
+-- ---------------------------------------------------------------------
+select testes.como_servidor();
+insert into public.conexoes (id, usuario_id, tipo, conta, segredo_cifrado) values
+  ('00000000-0000-4000-a400-000000000001', '00000000-0000-4000-a000-00000000a001', 'gmail', 'ana@gmail.com', 'v1:cifrado-da-ana'),
+  ('00000000-0000-4000-b400-000000000001', '00000000-0000-4000-a000-00000000b001', 'gmail', 'bruno@gmail.com', 'v1:cifrado-do-bruno');
+insert into public.emails (usuario_id, conexao_id, message_id, recebido_em, assunto, importancia) values
+  ('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a400-000000000001', '<a1@x>', now(), 'Boleto da Ana', 'importante'),
+  ('00000000-0000-4000-a000-00000000b001', '00000000-0000-4000-b400-000000000001', '<b1@x>', now(), 'Contrato do Bruno', 'urgente');
+insert into public.regras_email (usuario_id, tipo, padrao) values ('00000000-0000-4000-a000-00000000b001', 'importante', '@banco.com.br');
+select testes.deve_bloquear(
+  $q$insert into public.emails (usuario_id, conexao_id, message_id, recebido_em, importancia)
+     values ('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-b400-000000000001', '<x@x>', now(), 'normal')$q$,
+  'e-mail da Ana não pode apontar para a conexão do Bruno');
+
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.deve_bloquear('select segredo_cifrado from public.conexoes', 'Ana não lê o segredo nem da própria conexão');
+select testes.deve_bloquear('select * from public.conexoes', 'select * esbarra no segredo (não vaza por engano)');
+select testes.ok(
+  (select count(*) from public.conexoes) = 1 and (select conta from public.conexoes) = 'ana@gmail.com',
+  'Ana vê só a situação da conexão dela');
+select testes.ok((select count(*) from public.emails) = 1 and (select assunto from public.emails) = 'Boleto da Ana', 'Ana vê só os e-mails dela');
+select testes.ok((select count(*) from public.regras_email) = 0, 'Ana não vê as regras do Bruno');
+select testes.deve_bloquear(
+  $q$insert into public.conexoes (usuario_id, tipo, conta, segredo_cifrado) values ('00000000-0000-4000-a000-00000000a001', 'agenda_ics', 'x', 'y')$q$,
+  'Ana não grava conexão direto (só pelo robô, que testa e criptografa)');
+select testes.deve_bloquear(
+  $q$update public.conexoes set conta = 'outra' where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$,
+  'Ana não altera a conexão');
+select testes.deve_bloquear(
+  $q$insert into public.emails (usuario_id, conexao_id, message_id, recebido_em, importancia)
+     values ('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a400-000000000001', '<falso@x>', now(), 'urgente')$q$,
+  'Ana não cria e-mail falso');
+select testes.ok(
+  testes.linhas($q$insert into public.regras_email (usuario_id, tipo, padrao) values ('00000000-0000-4000-a000-00000000a001', 'ignorar', 'loja@promo.com')$q$) = 1,
+  'Ana cria regra de e-mail dela');
+select testes.deve_bloquear(
+  $q$insert into public.regras_email (usuario_id, tipo, padrao) values ('00000000-0000-4000-a000-00000000b001', 'ignorar', 'x@y.com')$q$,
+  'Ana não cria regra para o Bruno');
+select testes.ok(testes.linhas($q$delete from public.regras_email where usuario_id = '00000000-0000-4000-a000-00000000b001'$q$) = 0, 'Ana não apaga regra do Bruno');
+select testes.ok(testes.linhas($q$delete from public.emails where usuario_id = '00000000-0000-4000-a000-00000000b001'$q$) = 0, 'Ana não apaga e-mail do Bruno');
+select testes.ok(testes.linhas($q$delete from public.conexoes where usuario_id = '00000000-0000-4000-a000-00000000b001'$q$) = 0, 'Ana não desconecta o Bruno');
+select testes.deve_bloquear('select * from public.avisos_agenda', 'Ana não lê o controle de avisos da agenda');
+select testes.deve_bloquear(
+  $q$update public.perfis set ultimo_resumo_em = '2026-01-01' where id = '00000000-0000-4000-a000-00000000a001'$q$,
+  'Ana não mexe no controle do resumo da manhã');
+select testes.ok(
+  testes.linhas($q$update public.perfis set agenda_aviso_minutos = 30, resumo_manha_hora = 8 where id = '00000000-0000-4000-a000-00000000a001'$q$) = 1,
+  'Ana ajusta o aviso da agenda e a hora do resumo');
+select testes.ok(
+  testes.linhas($q$delete from public.conexoes where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$) = 1,
+  'Ana desconecta o e-mail dela');
+select testes.como_servidor();
+select testes.ok(
+  (select count(*) from public.emails where usuario_id = '00000000-0000-4000-a000-00000000a001') = 0
+  and (select count(*) from public.emails where usuario_id = '00000000-0000-4000-a000-00000000b001') = 1,
+  'desconectar apaga os e-mails guardados da Ana (e só dela)');
+select testes.como_anonimo();
+select testes.deve_bloquear('select id from public.conexoes', 'visitante não vê conexões');
+select testes.deve_bloquear('select id from public.emails', 'visitante não vê e-mails');
+select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa
 -- ---------------------------------------------------------------------
 delete from auth.users where id = '00000000-0000-4000-a000-00000000b001';

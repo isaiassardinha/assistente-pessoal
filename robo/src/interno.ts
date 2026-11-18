@@ -11,6 +11,8 @@ import { resultadoAutoteste } from "./autoteste";
 import { buscar } from "./cerebro";
 import { IaIndisponivel, responderComFontes } from "./ia";
 import { gerarCodigo, hashCodigo, LimitadorPorMinuto, numeroPermitido } from "./regras";
+import { emailValido, senhaDeAppValida } from "./email";
+import { compromissosDe, conectarAgenda, conectarGmail, ConexaoInvalida } from "./pessoal";
 import { acordarCerebro } from "./rotinas";
 import { comUso } from "./uso";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
@@ -144,6 +146,51 @@ export function iniciarApiInterna() {
         const pergunta = String(corpo.pergunta ?? "").trim().slice(0, 500);
         if (!UUID.test(usuarioId) || pergunta.length < 2) return json(res, 400, { ok: false, erro: "Escreva a pergunta." });
         return json(res, 200, await comUso(usuarioId, () => perguntar(usuarioId, pergunta)));
+      }
+      if (rota === "POST /conexoes/gmail" || rota === "POST /conexoes/agenda") {
+        const corpo = await lerCorpo(req);
+        const usuarioId = String(corpo.usuarioId ?? "");
+        if (!UUID.test(usuarioId)) return json(res, 400, { ok: false, erro: "pedido inválido" });
+        const perfil = await banco.perfilParaVerificacao(usuarioId);
+        if (!perfil || perfil.status !== "aprovado") return json(res, 403, { ok: false, erro: "Cadastro não aprovado." });
+        if (!config.chaveConexoes) return json(res, 503, { ok: false, erro: "O servidor ainda não está pronto para conexões. Tente em alguns minutos." });
+        try {
+          if (rota === "POST /conexoes/gmail") {
+            const email = String(corpo.email ?? "").trim();
+            const senha = String(corpo.senha ?? "");
+            if (!emailValido(email)) return json(res, 400, { ok: false, erro: "Digite o seu endereço do Gmail completo." });
+            if (!senhaDeAppValida(senha)) return json(res, 400, { ok: false, erro: "A senha de app tem 16 letras (o Google mostra em 4 blocos). Não é a senha normal da conta." });
+            await conectarGmail(usuarioId, email, senha);
+          } else {
+            await conectarAgenda(usuarioId, String(corpo.url ?? "").trim());
+          }
+          return json(res, 200, { ok: true });
+        } catch (e) {
+          if (e instanceof ConexaoInvalida) return json(res, 200, { ok: false, erro: e.message });
+          throw e;
+        }
+      }
+      if (rota === "GET /agenda") {
+        const p = new URL(req.url ?? "/", "http://x").searchParams;
+        const usuarioId = p.get("usuarioId") ?? "";
+        const de = p.get("de") ?? "";
+        const ate = p.get("ate") ?? de;
+        if (!UUID.test(usuarioId) || !/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+          return json(res, 400, { ok: false, erro: "pedido inválido" });
+        }
+        const lista = await compromissosDe(usuarioId, de, ate);
+        return json(res, 200, {
+          ok: true,
+          conectada: lista !== null,
+          compromissos: (lista ?? []).map((c) => ({
+            titulo: c.titulo,
+            inicio: c.inicio.toISOString(),
+            fim: c.fim.toISOString(),
+            diaInteiro: c.diaInteiro,
+            dia: c.dia,
+            local: c.local,
+          })),
+        });
       }
       return json(res, 404, { ok: false, erro: "não encontrado" });
     } catch (e) {

@@ -8,6 +8,7 @@ import { indexarAnotacoes, processarDocumento } from "./cerebro";
 import { IaIndisponivel } from "./ia";
 import { config, configuracoesFaltando } from "./config";
 import { log } from "./log";
+import { avisarCompromissos, cuidarDosEmails, enviarResumosDaManha } from "./pessoal";
 import { numeroPermitido } from "./regras";
 import { conectado, enviarTexto, NumeroSemWhatsApp } from "./whatsapp";
 
@@ -18,11 +19,14 @@ export function iniciarRotinas() {
   // alinha com o começo de cada minuto
   const atraso = 60_000 - (Date.now() % 60_000) + 1000;
   setTimeout(() => {
+    let volta = 0;
     void rodar();
     void cuidarDoCerebro();
+    void lerEmails();
     setInterval(() => {
       void rodar();
       void cuidarDoCerebro();
+      if (++volta % 2 === 0) void lerEmails(); // e-mail: a cada 2 minutos
     }, 60_000);
   }, atraso);
 }
@@ -80,6 +84,12 @@ async function avisarLeitura(usuarioId: string, r: { doc: banco.Documento; ok: b
   }
 }
 
+/** E-mail não depende do WhatsApp (os avisos esperam ele voltar). */
+async function lerEmails() {
+  if (configuracoesFaltando().length > 0 || !config.chaveConexoes) return;
+  await cuidarDosEmails().catch((e) => log.erro("e-mail:", e));
+}
+
 async function rodar() {
   if (rodando || !conectado() || configuracoesFaltando().length > 0) return;
   rodando = true;
@@ -88,9 +98,14 @@ async function rodar() {
     await avisarCadastrosNovos();
     await darBoasVindas();
     await cuidarDasContas();
+    if (config.chaveConexoes) {
+      await enviarResumosDaManha();
+      await avisarCompromissos();
+    }
     if (Date.now() - ultimaLimpeza > 3_600_000) {
       ultimaLimpeza = Date.now();
       await banco.limparRegistrosAntigos();
+      await banco.limparEmailsEAvisosAntigos();
     }
   } catch (e) {
     log.erro("rotina:", e);

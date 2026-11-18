@@ -25,6 +25,10 @@ export type Perfil = {
   contas_aviso_dias_antes: number;
   contas_aviso_atraso_cada: number;
   contas_aviso_hora: number;
+  agenda_aviso_minutos: number;
+  resumo_manha_hora: number;
+  silencio_inicio: number;
+  silencio_fim: number;
   ultimo_resumo_em: string | null;
   aprovado_em: string | null;
   criado_em: string;
@@ -156,6 +160,39 @@ export type Conta = {
   criado_em: string;
 };
 
+export type Conexao = {
+  id: string;
+  usuario_id: string;
+  tipo: "gmail" | "agenda_ics";
+  conta: string;
+  segredo_cifrado: string;
+  estado: Record<string, unknown>;
+  situacao: "ok" | "erro";
+  erro: string | null;
+  erro_avisado: boolean;
+  ultima_leitura: string | null;
+  criado_em: string;
+};
+
+export type EmailResumo = {
+  id: string;
+  usuario_id: string;
+  conexao_id: string;
+  message_id: string;
+  recebido_em: string;
+  remetente_nome: string | null;
+  remetente_email: string | null;
+  assunto: string | null;
+  resumo: string | null;
+  importancia: "urgente" | "importante" | "normal" | "ignorar";
+  motivo: string | null;
+  avisado_em: string | null;
+  no_resumo_em: string | null;
+  criado_em: string;
+};
+
+export type RegraEmail = { id: string; usuario_id: string; tipo: "importante" | "ignorar"; padrao: string; criado_em: string };
+
 export type Database = {
   __InternalSupabase: { PostgrestVersion: "14.18" };
   public: {
@@ -172,6 +209,9 @@ export type Database = {
       decisao_pontos: Tabela<DecisaoPonto>;
       documentos: Tabela<Documento>;
       contas: Tabela<Conta>;
+      conexoes: Tabela<Conexao>;
+      emails: Tabela<EmailResumo>;
+      regras_email: Tabela<RegraEmail>;
     };
     Views: { [_ in never]: never };
     Functions: {

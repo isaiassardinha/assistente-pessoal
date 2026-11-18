@@ -10,6 +10,8 @@ const pendente: {
 const apagadas: string[][] = [];
 const anotacoes: string[] = [];
 const documentosApagados: string[][] = [];
+const regras: { tipo: string; padrao: string }[] = [];
+vi.mock("./pessoal", () => ({ compromissosDe: async () => null }));
 const contas = {
   criadas: [] as {
     descricao: string;
@@ -112,6 +114,9 @@ vi.mock("./banco", () => ({
     return ids.length;
   },
   FaltaValor: class extends Error {},
+  criarRegraEmail: async (_uid: string, tipo: string, padrao: string) => {
+    regras.push({ tipo, padrao });
+  },
   criarLembrete: async (_uid: string, texto: string, quando: string) => ({
     id: "l1",
     texto,
@@ -151,6 +156,7 @@ beforeEach(() => {
   documentosApagados.length = 0;
   busca.trechos = [];
   contas.criadas.length = 0;
+  regras.length = 0;
   contas.pagas.length = 0;
   contas.canceladas.length = 0;
   contas.existentes = [
@@ -422,5 +428,22 @@ describe("contas a pagar", () => {
     const r = (await ferramenta("cancelar_contas", ["tira essas duas"]).executar({ ids: [ID1, ID2] })) as { resultado: string };
     expect(r.resultado).toMatch(/AGUARDANDO/);
     expect(contas.canceladas).toHaveLength(0);
+  });
+});
+
+describe("e-mail e agenda", () => {
+  it("regra com o remetente que a pessoa disse", async () => {
+    const r = (await ferramenta("criar_regra_email", ["e-mails do @meubanco.com.br são sempre importantes"]).executar({ tipo: "importante", padrao: "@meubanco.com.br" })) as { resultado: string };
+    expect(r.resultado).toBe("GRAVADO");
+    expect(regras).toEqual([{ tipo: "importante", padrao: "@meubanco.com.br" }]);
+  });
+  it("NÃO cria regra com remetente inventado", async () => {
+    const r = (await ferramenta("criar_regra_email", ["ignora as propagandas"]).executar({ tipo: "ignorar", padrao: "@loja.com" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO GRAVADO/);
+    expect(regras).toHaveLength(0);
+  });
+  it("agenda não conectada: orienta a conectar", async () => {
+    const r = (await ferramenta("ver_agenda", ["o que tenho amanhã?"]).executar({ de: "2026-11-18" })) as { resultado: string };
+    expect(r.resultado).toMatch(/AGENDA NÃO CONECTADA/);
   });
 });

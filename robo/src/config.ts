@@ -16,6 +16,8 @@ export const config = {
   siteUrl: opcional("SITE_URL").replace(/\/+$/, ""),
   /** Senha interna entre o site e o robô (gerada no servidor). */
   tokenInterno: opcional("INTERNO_TOKEN"),
+  /** Chave que criptografa as senhas das conexões (gerada no servidor). */
+  chaveConexoes: opcional("CONEXOES_CHAVE"),
   portaInterna: Number(opcional("ROBO_PORTA") || 3001),
   /** Pasta que guarda a sessão do WhatsApp (fica entre as versões). */
   pastaDados: opcional("PASTA_DADOS") || path.resolve("dados"),

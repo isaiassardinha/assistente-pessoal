@@ -1002,3 +1002,246 @@ export async function registrarUsoIa(u: {
   const { error } = await db().from("uso_ia").insert(u);
   falhou("registrar consumo da IA", error);
 }
+
+// ============================================================ E-MAIL E AGENDA
+
+export type TipoConexao = "gmail" | "agenda_ics";
+export type Conexao = {
+  id: string;
+  usuario_id: string;
+  tipo: TipoConexao;
+  conta: string;
+  segredo_cifrado: string;
+  estado: Record<string, unknown>;
+  situacao: "ok" | "erro";
+  erro_avisado: boolean;
+  ultima_leitura: string | null;
+};
+const CAMPOS_CONEXAO = "id, usuario_id, tipo, conta, segredo_cifrado, estado, situacao, erro_avisado, ultima_leitura";
+
+/** Conexões de um tipo, de todas as pessoas aprovadas (fila da rotina). */
+export async function conexoesAtivas(tipo: TipoConexao): Promise<Conexao[]> {
+  const { data, error } = await db()
+    .from("conexoes")
+    .select(`${CAMPOS_CONEXAO}, perfis!inner(status)`)
+    .eq("tipo", tipo)
+    .eq("perfis.status", "aprovado");
+  falhou("conexões ativas", error);
+  return ((data ?? []) as (Conexao & { perfis: unknown })[]).map(({ perfis: _p, ...c }) => c);
+}
+
+export async function conexaoDe(usuarioId: string, tipo: TipoConexao): Promise<Conexao | null> {
+  const { data, error } = await db().from("conexoes").select(CAMPOS_CONEXAO).eq("usuario_id", usuarioId).eq("tipo", tipo).maybeSingle();
+  falhou("conexão", error);
+  return (data as Conexao) ?? null;
+}
+
+/** Grava (ou troca) a conexão; começa do zero (estado vazio, sem erro). */
+export async function salvarConexao(usuarioId: string, tipo: TipoConexao, conta: string, segredoCifrado: string): Promise<Conexao> {
+  const { data, error } = await db()
+    .from("conexoes")
+    .upsert(
+      {
+        usuario_id: usuarioId,
+        tipo,
+        conta: conta.slice(0, 200),
+        segredo_cifrado: segredoCifrado,
+        estado: {},
+        situacao: "ok",
+        erro: null,
+        erro_avisado: false,
+        ultima_leitura: null,
+      },
+      { onConflict: "usuario_id,tipo" },
+    )
+    .select(CAMPOS_CONEXAO)
+    .single();
+  falhou("salvar conexão", error);
+  return data as Conexao;
+}
+
+export async function atualizarConexao(
+  usuarioId: string,
+  id: string,
+  campos: Partial<{ estado: Record<string, unknown>; situacao: "ok" | "erro"; erro: string | null; erro_avisado: boolean; ultima_leitura: string }>,
+) {
+  const { error } = await db().from("conexoes").update(campos).eq("usuario_id", usuarioId).eq("id", id);
+  falhou("atualizar conexão", error);
+}
+
+// ------------------------------------------------------------ regras
+
+export type RegraEmail = { id: string; tipo: "importante" | "ignorar"; padrao: string };
+
+export async function regrasEmail(usuarioId: string): Promise<RegraEmail[]> {
+  const { data, error } = await db().from("regras_email").select("id, tipo, padrao").eq("usuario_id", usuarioId).order("criado_em");
+  falhou("regras de e-mail", error);
+  return (data ?? []) as RegraEmail[];
+}
+
+export async function criarRegraEmail(usuarioId: string, tipo: RegraEmail["tipo"], padrao: string): Promise<void> {
+  const { error } = await db()
+    .from("regras_email")
+    .upsert({ usuario_id: usuarioId, tipo, padrao }, { onConflict: "usuario_id,tipo,padrao", ignoreDuplicates: true });
+  falhou("criar regra de e-mail", error);
+}
+
+export async function apagarRegrasEmail(usuarioId: string, ids: string[]): Promise<number> {
+  const { data, error } = await db().from("regras_email").delete().eq("usuario_id", usuarioId).in("id", ids).select("id");
+  falhou("apagar regras de e-mail", error);
+  return data?.length ?? 0;
+}
+
+// ------------------------------------------------------------ e-mails
+
+export type EmailGuardado = {
+  id: string;
+  recebido_em: string;
+  remetente_nome: string | null;
+  remetente_email: string | null;
+  assunto: string | null;
+  resumo: string | null;
+  importancia: "urgente" | "importante" | "normal" | "ignorar";
+  motivo: string | null;
+  avisado_em: string | null;
+};
+const CAMPOS_EMAIL = "id, recebido_em, remetente_nome, remetente_email, assunto, resumo, importancia, motivo, avisado_em";
+
+export type EmailNovo = Omit<EmailGuardado, "id" | "avisado_em"> & { message_id: string; avisado_em?: string | null };
+
+/** Grava os e-mails novos (repetidos são ignorados); devolve só os que entraram agora. */
+export async function gravarEmails(usuarioId: string, conexaoId: string, emails: EmailNovo[]): Promise<EmailGuardado[]> {
+  if (emails.length === 0) return [];
+  const { data, error } = await db()
+    .from("emails")
+    .upsert(
+      emails.map((e) => ({ ...e, usuario_id: usuarioId, conexao_id: conexaoId })),
+      { onConflict: "usuario_id,message_id", ignoreDuplicates: true },
+    )
+    .select(CAMPOS_EMAIL);
+  falhou("gravar e-mails", error);
+  return (data ?? []) as EmailGuardado[];
+}
+
+export async function marcarEmailsAvisados(usuarioId: string, ids: string[]) {
+  if (ids.length === 0) return;
+  const { error } = await db().from("emails").update({ avisado_em: new Date().toISOString() }).eq("usuario_id", usuarioId).in("id", ids);
+  falhou("marcar e-mails avisados", error);
+}
+
+export async function marcarEmailsNoResumo(usuarioId: string, ids: string[]) {
+  if (ids.length === 0) return;
+  const agora = new Date().toISOString();
+  const { error } = await db().from("emails").update({ no_resumo_em: agora }).eq("usuario_id", usuarioId).in("id", ids);
+  falhou("marcar e-mails no resumo", error);
+}
+
+/** Urgentes que ficaram guardados (horário de silêncio) e ainda não foram avisados. */
+export async function urgentesPendentes(usuarioId: string, desde: string): Promise<EmailGuardado[]> {
+  const { data, error } = await db()
+    .from("emails")
+    .select(CAMPOS_EMAIL)
+    .eq("usuario_id", usuarioId)
+    .eq("importancia", "urgente")
+    .is("avisado_em", null)
+    .is("no_resumo_em", null)
+    .gte("recebido_em", desde)
+    .order("recebido_em");
+  falhou("urgentes pendentes", error);
+  return (data ?? []) as EmailGuardado[];
+}
+
+/** E-mails para o resumo da manhã: importantes e urgentes ainda não resumidos. */
+export async function emailsParaResumo(usuarioId: string, desde: string): Promise<EmailGuardado[]> {
+  const { data, error } = await db()
+    .from("emails")
+    .select(CAMPOS_EMAIL)
+    .eq("usuario_id", usuarioId)
+    .in("importancia", ["urgente", "importante"])
+    .is("no_resumo_em", null)
+    .gte("recebido_em", desde)
+    .order("recebido_em")
+    .limit(30);
+  falhou("e-mails para o resumo", error);
+  return (data ?? []) as EmailGuardado[];
+}
+
+export async function emailsRecentes(
+  usuarioId: string,
+  filtro: { desde: string; importancias?: EmailGuardado["importancia"][]; busca?: string; limite?: number },
+): Promise<EmailGuardado[]> {
+  let q = db().from("emails").select(CAMPOS_EMAIL).eq("usuario_id", usuarioId).gte("recebido_em", filtro.desde);
+  if (filtro.importancias?.length) q = q.in("importancia", filtro.importancias);
+  if (filtro.busca) {
+    const termo = filtro.busca.replace(/[%_,()*]/g, " ").trim();
+    if (termo) q = q.or(`assunto.ilike.%${termo}%,remetente_nome.ilike.%${termo}%,remetente_email.ilike.%${termo}%,resumo.ilike.%${termo}%`);
+  }
+  const { data, error } = await q.order("recebido_em", { ascending: false }).limit(filtro.limite ?? 30);
+  falhou("e-mails recentes", error);
+  return (data ?? []) as EmailGuardado[];
+}
+
+// ------------------------------------------------------------ agenda
+
+/** Marca que o aviso deste compromisso foi dado; false se já tinha sido. */
+export async function registrarAvisoAgenda(usuarioId: string, evento: string, inicio: string): Promise<boolean> {
+  const { data, error } = await db()
+    .from("avisos_agenda")
+    .upsert({ usuario_id: usuarioId, evento, inicio }, { onConflict: "usuario_id,evento,inicio", ignoreDuplicates: true })
+    .select("usuario_id");
+  falhou("aviso da agenda", error);
+  return (data?.length ?? 0) > 0;
+}
+
+// ------------------------------------------------------------ preferências e resumo
+
+export type Preferencias = {
+  id: string;
+  nome: string;
+  celular: string | null;
+  celular_verificado: boolean;
+  status: string;
+  resumo_manha: boolean;
+  resumo_manha_hora: number;
+  ultimo_resumo_em: string | null;
+  agenda_aviso_minutos: number;
+  silencio_inicio: number;
+  silencio_fim: number;
+};
+const CAMPOS_PREF =
+  "id, nome, celular, celular_verificado, status, resumo_manha, resumo_manha_hora, ultimo_resumo_em, agenda_aviso_minutos, silencio_inicio, silencio_fim";
+
+export async function preferencias(usuarioId: string): Promise<Preferencias | null> {
+  const { data, error } = await db().from("perfis").select(CAMPOS_PREF).eq("id", usuarioId).maybeSingle();
+  falhou("preferências", error);
+  return (data as Preferencias) ?? null;
+}
+
+/** Pessoas com resumo da manhã ligado que ainda não receberam o de hoje (fila da rotina). */
+export async function perfisParaResumo(hoje: string, hora: number): Promise<Preferencias[]> {
+  const { data, error } = await db()
+    .from("perfis")
+    .select(CAMPOS_PREF)
+    .eq("status", "aprovado")
+    .eq("resumo_manha", true)
+    .eq("celular_verificado", true)
+    .lte("resumo_manha_hora", hora)
+    .or(`ultimo_resumo_em.is.null,ultimo_resumo_em.lt.${hoje}`);
+  falhou("perfis para o resumo", error);
+  return (data ?? []) as Preferencias[];
+}
+
+export async function marcarResumoEnviado(usuarioId: string, hoje: string) {
+  const { error } = await db().from("perfis").update({ ultimo_resumo_em: hoje }).eq("id", usuarioId);
+  falhou("marcar resumo", error);
+}
+
+/** Limpeza: resumos de e-mail com mais de 60 dias e avisos de agenda antigos. */
+export async function limparEmailsEAvisosAntigos() {
+  const antes60 = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const antes7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const { error: e1 } = await db().from("emails").delete().lt("recebido_em", antes60);
+  falhou("limpar e-mails", e1);
+  const { error: e2 } = await db().from("avisos_agenda").delete().lt("inicio", antes7);
+  falhou("limpar avisos da agenda", e2);
+}

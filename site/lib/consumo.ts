@@ -20,6 +20,7 @@ export const NOMES_TIPO: Record<string, string> = {
   vetores: "Preparar documentos para busca",
   pergunta: "Perguntas na tela Cérebro",
   autoteste: "Autoteste do sistema",
+  email: "Triagem de e-mails",
 };
 
 export type Total = { chamadas: number; entrada: number; saida: number; custo: number };

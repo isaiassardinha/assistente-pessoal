@@ -157,3 +157,8 @@ export function formatarDataHora(iso: string): string {
   const local = instanteParaLocal(iso);
   return `${formatarData(local.slice(0, 10))} às ${local.slice(11)}`;
 }
+
+/** Instante (ISO) de N horas atrás. */
+export function horasAtras(horas: number): string {
+  return new Date(Date.now() - horas * 3_600_000).toISOString();
+}

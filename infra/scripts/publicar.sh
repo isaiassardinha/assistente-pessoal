@@ -84,6 +84,12 @@ if ! grep -q '^INTERNO_TOKEN=' /etc/assistente/site.env; then
   echo "INTERNO_TOKEN=$(openssl rand -hex 32)" >> /etc/assistente/site.env
   log "Senha interna site-robô criada"
 fi
+# chave que criptografa as senhas das conexões (e-mail, agenda). Se um dia ela
+# se perder, basta cada pessoa conectar de novo: nada mais depende dela.
+if ! grep -q '^CONEXOES_CHAVE=' /etc/assistente/site.env; then
+  echo "CONEXOES_CHAVE=$(openssl rand -hex 32)" >> /etc/assistente/site.env
+  log "Chave das conexões criada"
+fi
 install -d -m 700 -o "$USUARIO" -g "$USUARIO" "$CASA/dados"
 
 # ---- atualizar configurações do servidor que vêm com a versão --------

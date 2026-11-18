@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import * as banco from "./banco";
 import { log } from "./log";
 
-export type TipoUso = "conversa" | "audio" | "leitura" | "resumo" | "vetores" | "pergunta" | "autoteste";
+export type TipoUso = "conversa" | "audio" | "leitura" | "resumo" | "vetores" | "pergunta" | "autoteste" | "email";
 
 /**
  * Preço de tabela do Gemini (US$ por 1 milhão de tokens), conferido em

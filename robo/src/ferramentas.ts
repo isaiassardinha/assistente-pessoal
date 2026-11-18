@@ -11,6 +11,8 @@ import { dataValida, intervaloDoPeriodo, instanteParaLocal, localParaInstante, s
 import { formatarReais } from "@/lib/dinheiro";
 import * as banco from "./banco";
 import { buscar } from "./cerebro";
+import { descreverCompromisso } from "./agenda";
+import { compromissosDe } from "./pessoal";
 import type { Ferramenta } from "./ia";
 import { situacaoDaConta } from "@/lib/contas";
 import {
@@ -20,6 +22,7 @@ import {
   encontrarCategoria,
   horaFoiDita,
   respostaAfirmativa,
+  semAcento,
   textoFoiDito,
   valorFoiDito,
 } from "./regras";
@@ -1222,6 +1225,117 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
               conta_fixa: f.descricao,
             }
           : { resultado: "NÃO EXECUTADO: conta fixa não encontrada" };
+      },
+    },
+    // ======================================================= agenda e e-mail
+    {
+      nome: "ver_agenda",
+      descricao:
+        "Mostra os compromissos da agenda pessoal (Google Agenda) entre duas datas AAAA-MM-DD (até 15 dias à frente). " +
+        "Ex.: 'o que tenho amanhã?', 'estou livre sexta à tarde?'. Só leitura: ainda não cria compromissos.",
+      parametros: {
+        type: "object",
+        properties: { de: { type: "string", description: "AAAA-MM-DD" }, ate: { type: "string", description: "AAAA-MM-DD (padrão: igual a de)" } },
+        required: ["de"],
+      },
+      executar: async (a) => {
+        const de = dataValida(String(a.de ?? "")) ? String(a.de) : ctx.hoje;
+        const ate = dataValida(String(a.ate ?? "")) ? String(a.ate) : de;
+        if (ate < de || ate > somarDias(ctx.hoje, 15)) return { resultado: "NÃO EXECUTADO: período inválido (até 15 dias à frente)" };
+        const lista = await compromissosDe(uid, de, ate);
+        if (lista === null) return { resultado: "AGENDA NÃO CONECTADA: explique que dá para conectar no site, em Minha conta → Conexões." };
+        return {
+          quantidade: lista.length,
+          compromissos: lista.map((c) => ({ dia: dataCurta(c.dia, ctx.hoje), quando: descreverCompromisso(c) })),
+        };
+      },
+    },
+    {
+      nome: "emails_recentes",
+      descricao:
+        "Lista os e-mails recebidos nos últimos dias (resumo, remetente, importância). quais: 'importantes' (urgentes e importantes) ou 'todos'. " +
+        "Ex.: 'chegou algo importante hoje?'.",
+      parametros: {
+        type: "object",
+        properties: { quais: { type: "string", enum: ["importantes", "todos"] }, dias: { type: "integer", description: "1 a 30 (padrão 1)" } },
+      },
+      executar: async (a) => {
+        const dias = Math.min(30, Math.max(1, Number(a.dias) || 1));
+        const lista = await banco.emailsRecentes(uid, {
+          desde: new Date(Date.now() - dias * 86_400_000).toISOString(),
+          importancias: a.quais === "todos" ? undefined : ["urgente", "importante"],
+          limite: 25,
+        });
+        if (lista.length === 0 && !(await banco.conexaoDe(uid, "gmail"))) {
+          return { resultado: "E-MAIL NÃO CONECTADO: explique que dá para conectar no site, em Minha conta → Conexões." };
+        }
+        return {
+          quantidade: lista.length,
+          emails: lista.map((e) => ({
+            de: e.remetente_nome || e.remetente_email,
+            assunto: e.assunto,
+            resumo: e.resumo,
+            importancia: e.importancia,
+            quando: dataCurta(instanteParaLocal(e.recebido_em).slice(0, 10), ctx.hoje) + " " + instanteParaLocal(e.recebido_em).slice(11, 16),
+          })),
+          observacao: "Só existem remetente, assunto e um resumo curto; o texto completo fica no Gmail.",
+        };
+      },
+    },
+    {
+      nome: "buscar_emails",
+      descricao: "Procura e-mails dos últimos 60 dias por remetente, assunto ou palavra do resumo. Ex.: 'o que o banco mandou?'.",
+      parametros: { type: "object", properties: { texto: { type: "string" } }, required: ["texto"] },
+      executar: async (a) => {
+        const termo = texto(a.texto, 80);
+        if (!termo) return { resultado: "NÃO EXECUTADO: diga o que procurar" };
+        const lista = await banco.emailsRecentes(uid, { desde: new Date(Date.now() - 60 * 86_400_000).toISOString(), busca: termo, limite: 15 });
+        return {
+          quantidade: lista.length,
+          emails: lista.map((e) => ({
+            de: e.remetente_nome || e.remetente_email,
+            assunto: e.assunto,
+            resumo: e.resumo,
+            quando: dataCurta(instanteParaLocal(e.recebido_em).slice(0, 10), ctx.hoje),
+          })),
+        };
+      },
+    },
+    {
+      nome: "listar_regras_email",
+      descricao: "Lista as regras de e-mail: remetentes/palavras que sempre avisam na hora e os que são ignorados.",
+      parametros: { type: "object", properties: {} },
+      executar: async () => ({ regras: await banco.regrasEmail(uid) }),
+    },
+    {
+      nome: "criar_regra_email",
+      descricao:
+        "Cria regra de e-mail. tipo 'importante' = sempre avisar na hora; 'ignorar' = nunca avisar. " +
+        "padrao: endereço (fulano@x.com), domínio inteiro (@x.com) ou uma palavra — exatamente como a pessoa disse.",
+      parametros: {
+        type: "object",
+        properties: { tipo: { type: "string", enum: ["importante", "ignorar"] }, padrao: { type: "string" } },
+        required: ["tipo", "padrao"],
+      },
+      executar: async (a) => {
+        const padrao = texto(a.padrao, 200).toLowerCase();
+        if (a.tipo !== "importante" && a.tipo !== "ignorar") return { resultado: "NÃO GRAVADO: tipo inválido" };
+        if (padrao.length < 2) return { resultado: "NÃO GRAVADO: diga o remetente, domínio ou palavra" };
+        const base = semAcento(padrao.replace(/^@/, ""));
+        if (!ctx.textosDaPessoa.some((t) => semAcento(t.toLowerCase()).includes(base))) {
+          return { resultado: "NÃO GRAVADO: use o remetente/palavra exatamente como a pessoa disse (ou pergunte)" };
+        }
+        await banco.criarRegraEmail(uid, a.tipo, padrao);
+        return { resultado: "GRAVADO", regra: { tipo: a.tipo === "importante" ? "sempre avisar na hora" : "ignorar", padrao } };
+      },
+    },
+    {
+      nome: "apagar_regras_email",
+      descricao: "Apaga regras de e-mail pelos ids (de listar_regras_email).",
+      parametros: { type: "object", properties: { ids: { type: "array", items: { type: "string" } } }, required: ["ids"] },
+      executar: async (a) => {
+        const n = await banco.apagarRegrasEmail(uid, ids(a.ids));
+        return n ? { resultado: "APAGADA(S)", quantidade: n } : { resultado: "NÃO EXECUTADO: regra não encontrada" };
       },
     },
   ];
