@@ -56,6 +56,11 @@ async function testarTudo() {
 }
 
 export function iniciarAutoteste() {
-  setTimeout(() => void rodarAutoteste(), 10_000);
-  setInterval(() => void rodarAutoteste(), 6 * 3_600_000);
+  const rodarEConferir = async () => {
+    await rodarAutoteste();
+    // instabilidade passageira da IA acontece: se algo falhou, confere de novo em 10 minutos
+    if ([estado.conversa, estado.vetores, estado.pdf].includes("falhou")) setTimeout(() => void rodarEConferir(), 10 * 60_000);
+  };
+  setTimeout(() => void rodarEConferir(), 10_000);
+  setInterval(() => void rodarEConferir(), 6 * 3_600_000);
 }
