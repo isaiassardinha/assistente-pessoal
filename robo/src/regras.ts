@@ -83,6 +83,39 @@ export function horaFoiDita(textosDaPessoa: string[]): boolean {
   });
 }
 
+// ------------------------------------------------------------- datas ditas
+
+const DIAS_SEMANA = ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"];
+
+/**
+ * A data (AAAA-MM-DD) foi dita pela pessoa? Aceita o número do dia
+ * ("dia 25", "25/11"), "hoje", "amanhã", "depois de amanhã" e dia da semana.
+ */
+export function dataFoiDita(data: string, textosDaPessoa: string[], hoje: string): boolean {
+  const dia = Number(data.slice(8, 10));
+  const textos = textosDaPessoa.map(semAcento);
+  const somar = (n: number) => {
+    const d = new Date(`${hoje}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  if (textos.some((t) => new RegExp(`(^|[^0-9])0?${dia}([^0-9]|$)`).test(t))) return true;
+  if (data === hoje && textos.some((t) => /\bhoje\b/.test(t))) return true;
+  if (data === somar(1) && textos.some((t) => /\bamanha\b/.test(t) && !/depois de amanha/.test(t))) return true;
+  if (data === somar(2) && textos.some((t) => /depois de amanha/.test(t))) return true;
+  const semana = DIAS_SEMANA[new Date(`${data}T12:00:00Z`).getUTCDay()];
+  const distancia =
+    (Date.UTC(+data.slice(0, 4), +data.slice(5, 7) - 1, dia) - Date.UTC(+hoje.slice(0, 4), +hoje.slice(5, 7) - 1, +hoje.slice(8, 10))) /
+    86_400_000;
+  if (distancia > 0 && distancia <= 7 && textos.some((t) => new RegExp(`\\b${semana}\\b`).test(t))) return true;
+  return false;
+}
+
+/** O dia do mês (1 a 31) foi dito pela pessoa? */
+export function diaFoiDito(dia: number, textosDaPessoa: string[]): boolean {
+  return textosDaPessoa.some((t) => new RegExp(`(^|[^0-9])0?${dia}([^0-9]|$)`).test(semAcento(t)));
+}
+
 // ------------------------------------------------------------- confirmação
 
 /** A pessoa disse claramente que sim? */

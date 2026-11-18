@@ -3,7 +3,8 @@ import Link from "next/link";
 import { FormularioAcao } from "@/components/FormularioAcao";
 import { Abrir, Aviso, Campo, Secao } from "@/components/ui";
 import { exigirAprovado } from "@/lib/auth/sessao";
-import { formatarDataHora, hojeISO, inicioDoMes } from "@/lib/datas";
+import { situacaoDaConta } from "@/lib/contas";
+import { formatarDataHora, hojeISO, inicioDoMes, somarDias } from "@/lib/datas";
 import { formatarReais, valorParaCampo } from "@/lib/dinheiro";
 import { classeLargura, situacaoDoOrcamento } from "@/lib/orcamento";
 import { formatarCelular } from "@/lib/validacao";
@@ -17,7 +18,20 @@ const CORES = {
   vermelho: "bg-red-500",
 } as const;
 
-const NOMES_MES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const NOMES_MES = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
 
 export default async function Painel({ searchParams }: PageProps<"/painel">) {
   const { supabase, perfil } = await exigirAprovado();
@@ -25,14 +39,27 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
   const hoje = hojeISO();
   const inicio = inicioDoMes(hoje);
 
-  const [{ data: categorias }, { data: despesas }, { data: orcamentos }, { data: lembretes }, { data: tarefas, count: totalTarefas }] =
-    await Promise.all([
-      supabase.from("categorias").select("id, nome").order("nome"),
-      supabase.from("despesas").select("valor, categoria_id").gte("data", inicio).lte("data", hoje).limit(10000),
-      supabase.from("orcamentos").select("categoria_id, limite_mensal"),
-      supabase.from("lembretes").select("id, texto, quando").in("status", ["pendente", "enviando"]).order("quando").limit(5),
-      supabase.from("tarefas").select("id, titulo", { count: "exact" }).eq("concluida", false).order("criado_em").limit(5),
-    ]);
+  const [
+    { data: categorias },
+    { data: despesas },
+    { data: orcamentos },
+    { data: lembretes },
+    { data: tarefas, count: totalTarefas },
+    { data: contasProximas },
+  ] = await Promise.all([
+    supabase.from("categorias").select("id, nome").order("nome"),
+    supabase.from("despesas").select("valor, categoria_id").gte("data", inicio).lte("data", hoje).limit(10000),
+    supabase.from("orcamentos").select("categoria_id, limite_mensal"),
+    supabase.from("lembretes").select("id, texto, quando").in("status", ["pendente", "enviando"]).order("quando").limit(5),
+    supabase.from("tarefas").select("id, titulo", { count: "exact" }).eq("concluida", false).order("criado_em").limit(5),
+    supabase
+      .from("contas")
+      .select("id, descricao, valor, vencimento, status")
+      .eq("status", "a_pagar")
+      .lte("vencimento", somarDias(hoje, 7))
+      .order("vencimento")
+      .limit(8),
+  ]);
 
   const gastos = new Map<string, number>();
   let totalMes = 0;
@@ -46,7 +73,11 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
 
   // Categorias com gasto ou limite primeiro (maior gasto antes); as outras depois.
   const linhas = (categorias ?? [])
-    .map((c) => ({ ...c, gasto: gastos.get(c.id) ?? 0, limite: limites.get(c.id) ?? null }))
+    .map((c) => ({
+      ...c,
+      gasto: gastos.get(c.id) ?? 0,
+      limite: limites.get(c.id) ?? null,
+    }))
     .sort((a, b) => b.gasto - a.gasto || Number(b.limite !== null) - Number(a.limite !== null) || a.nome.localeCompare(b.nome));
   const mes = NOMES_MES[Number(hoje.slice(5, 7)) - 1];
 
@@ -89,7 +120,9 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
                         <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-zinc-100">
                           <div className={`h-full rounded-full ${CORES[situacao.cor]} ${classeLargura(situacao.percentual)}`} />
                         </div>
-                        <p className={`mt-0.5 text-xs ${situacao.cor === "vermelho" ? "text-red-700" : situacao.cor === "ambar" ? "text-amber-700" : "text-zinc-500"}`}>
+                        <p
+                          className={`mt-0.5 text-xs ${situacao.cor === "vermelho" ? "text-red-700" : situacao.cor === "ambar" ? "text-amber-700" : "text-zinc-500"}`}
+                        >
                           {Math.round(situacao.percentual)}% · {situacao.texto}
                         </p>
                       </>
@@ -120,6 +153,31 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
         </div>
 
         <div className="space-y-6">
+          <Secao titulo="Contas a pagar">
+            <ul className="space-y-2">
+              {(contasProximas ?? []).length === 0 ? <li className="text-sm text-zinc-500">Nada vencendo nos próximos 7 dias.</li> : null}
+              {(contasProximas ?? []).map((c) => {
+                const s = situacaoDaConta({ ...c, valor: c.valor == null ? null : Number(c.valor) }, hoje);
+                return (
+                  <li key={c.id} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="text-zinc-900">
+                      {c.descricao}{" "}
+                      <span
+                        className={s.situacao === "atrasada" ? "text-red-700" : s.situacao === "hoje" ? "text-amber-700" : "text-zinc-500"}
+                      >
+                        · {s.texto}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-zinc-700">{c.valor == null ? "a definir" : formatarReais(Number(c.valor))}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            <Link href="/painel/contas" className="mt-3 inline-block text-sm font-medium text-emerald-700 hover:underline">
+              Ver todas →
+            </Link>
+          </Secao>
+
           <Secao titulo="Próximos lembretes">
             <ul className="space-y-2">
               {(lembretes ?? []).length === 0 ? <li className="text-sm text-zinc-500">Nenhum lembrete agendado.</li> : null}

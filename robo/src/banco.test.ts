@@ -20,6 +20,7 @@ const TABELAS_PESSOAIS = [
   "acoes_pendentes",
   "codigos_verificacao",
   "trechos",
+  "contas",
 ];
 
 // Funções que leem perfis/avisos pelo próprio servidor (não são dados de um usuário específico)
@@ -32,11 +33,14 @@ const EXCECOES = new Set([
 ]);
 
 const codigo = readFileSync(path.join(__dirname, "banco.ts"), "utf8");
-const funcoes = codigo.split(/\nexport async function /).slice(1).map((bloco) => {
-  const nome = bloco.slice(0, bloco.indexOf("("));
-  const corpo = bloco.slice(0, bloco.search(/\n}\n/));
-  return { nome, corpo };
-});
+const funcoes = codigo
+  .split(/\nexport async function /)
+  .slice(1)
+  .map((bloco) => {
+    const nome = bloco.slice(0, bloco.indexOf("("));
+    const corpo = bloco.slice(0, bloco.search(/\n}\n/));
+    return { nome, corpo };
+  });
 
 describe("todo acesso a dados pessoais é filtrado pelo dono", () => {
   it("encontrou as funções do banco", () => {

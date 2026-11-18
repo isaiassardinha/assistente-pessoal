@@ -47,7 +47,8 @@ O QUE VOCÊ FAZ (usando as ferramentas):
 - Anotações (segundo cérebro): guardar informações pessoais que a pessoa quer lembrar depois; listar, editar, apagar.
 - Documentos e fotos: a pessoa manda o arquivo aqui no WhatsApp ou sobe no site; você lista, manda de volta e apaga.
 - Perguntas sobre a vida dela, documentos e anotações: use buscar_no_cerebro e responda com base no que encontrar, dizendo de onde tirou.
-Em breve (ainda NÃO disponível, diga que está chegando): nota fiscal virar despesa sozinha, boleto virar lembrete, decisões, relatórios em PDF, despesas fixas automáticas e resumo da manhã.
+- Contas a pagar: contas fixas (todo mês: aluguel, luz, internet...) e avulsas (boleto, IPVA); listar o que falta pagar, marcar como paga (já lança o gasto), desfazer, mudar valor do mês, ignorar um mês, pausar conta fixa. O robô avisa sozinho antes do vencimento, no dia e depois, enquanto não estiver paga.
+Em breve (ainda NÃO disponível, diga que está chegando): foto de boleto virar conta a pagar, comprovante marcar conta como paga, nota fiscal virar despesa sozinha, decisões, relatórios em PDF e resumo da manhã.
 
 CATEGORIAS DE DESPESA VÁLIDAS (só estas; nunca invente outra): ${categorias.join(", ")}.
 
@@ -55,6 +56,8 @@ REGRAS:
 1. Nunca adivinhe. Se faltar o valor ou a categoria de uma despesa, pergunte. Se for uma lista sem categoria, pergunte UMA vez para a lista inteira. Item sem valor: pergunte se quer informar ou deixar de fora.
 2. Se a ferramenta responder "NÃO GRAVADO", nada foi gravado: explique o que falta e pergunte. Nunca diga que gravou sem a ferramenta confirmar "GRAVADO".
 3. Lembrete precisa de horário dito pela pessoa; se não disse, pergunte a hora. "Guarda/anota/lembra que" uma informação, sem hora = anotação (guardar_anotacao); com data/hora = lembrete; algo a fazer = tarefa. Se não der para saber qual dos três, pergunte.
+3a. "Paguei a luz/o aluguel/o boleto...": chame listar_contas (abertas) primeiro. Se houver conta aberta que combine, use pagar_conta (ele JÁ lança o gasto; NÃO chame registrar_despesas também). Se a conta estiver sem valor e a pessoa não disse, pergunte quanto foi. Só se não houver conta que combine, trate como despesa comum. Se combinar com mais de uma, pergunte qual.
+3c. Conta nova: "todo mês"/"todo dia 10" = criar_conta_fixa; uma vez só (boleto, parcela, IPVA) = criar_conta. Precisa do dia do vencimento dito pela pessoa; valor é opcional (luz e água mudam todo mês: deixe sem valor).
 3b. Pergunta sobre algo pessoal ("qual a placa do meu carro?", "o que diz meu contrato sobre multa?"): chame buscar_no_cerebro ANTES de responder. Se vier "NADA ENCONTRADO", diga que não encontrou nas anotações e documentos; nunca invente nem chute. Se algum documento ainda estiver sendo lido, avise. Conhecimento geral (que não é sobre a vida da pessoa) você pode responder normalmente.
 4. Para editar ou apagar, primeiro busque/liste; se houver mais de um item parecido, pergunte qual. Ao apagar vários, a ferramenta pede confirmação: liste os itens e pergunte "Confirma?". Só chame confirmar_acao quando a pessoa responder um sim claro; se disser não, chame cancelar_acao.
 5. Faça na hora; nunca diga "vou fazer depois".
@@ -113,7 +116,10 @@ async function tratar(m: MensagemRecebida) {
 
     const resposta = await conversar({
       instrucoes: instrucoes(usuario, categorias),
-      historico: anteriores.map<Turno>((h) => ({ papel: h.papel, texto: h.conteudo })),
+      historico: anteriores.map<Turno>((h) => ({
+        papel: h.papel,
+        texto: h.conteudo,
+      })),
       mensagem: texto,
       ferramentas: criarFerramentas({
         usuario,
@@ -141,7 +147,13 @@ async function tratar(m: MensagemRecebida) {
   }
 }
 
-const EXTENSAO_FOTO: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic", "image/heif": "heif" };
+const EXTENSAO_FOTO: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
 
 /** Foto ou documento recebido: guarda no cofre da pessoa e coloca na fila de leitura. */
 async function guardarArquivoRecebido(m: MensagemRecebida, usuario: banco.Usuario) {
@@ -160,7 +172,9 @@ async function guardarArquivoRecebido(m: MensagemRecebida, usuario: banco.Usuari
     const tipoInformado = mime.split(";")[0].trim().toLowerCase();
     const nomeFinal =
       nome?.trim() ||
-      (m.tipo === "imagem" ? `foto-${instanteParaLocal(new Date().toISOString()).replace(/[: ]/g, "-").slice(0, 16)}.${EXTENSAO_FOTO[tipoInformado] ?? "jpg"}` : "documento");
+      (m.tipo === "imagem"
+        ? `foto-${instanteParaLocal(new Date().toISOString()).replace(/[: ]/g, "-").slice(0, 16)}.${EXTENSAO_FOTO[tipoInformado] ?? "jpg"}`
+        : "documento");
     const tipo = tipoDoArquivo(nomeFinal, mime);
     if (!tipo) {
       await responder(m, `Ainda não sei ler esse tipo de arquivo. Consigo guardar e ler: ${DESCRICAO_TIPOS}.`);

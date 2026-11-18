@@ -22,12 +22,20 @@ export type Perfil = {
   is_admin: boolean;
   nome_assistente: string;
   resumo_manha: boolean;
+  contas_aviso_dias_antes: number;
+  contas_aviso_atraso_cada: number;
+  contas_aviso_hora: number;
   ultimo_resumo_em: string | null;
   aprovado_em: string | null;
   criado_em: string;
 };
 
-export type Categoria = { id: string; usuario_id: string; nome: string; criado_em: string };
+export type Categoria = {
+  id: string;
+  usuario_id: string;
+  nome: string;
+  criado_em: string;
+};
 
 export type Despesa = {
   id: string;
@@ -45,7 +53,7 @@ export type DespesaFixa = {
   id: string;
   usuario_id: string;
   descricao: string;
-  valor: number;
+  valor: number | null;
   categoria_id: string;
   dia_vencimento: number;
   ativa: boolean;
@@ -131,6 +139,22 @@ export type Documento = {
   criado_em: string;
 };
 
+export type Conta = {
+  id: string;
+  usuario_id: string;
+  descricao: string;
+  valor: number | null;
+  categoria_id: string;
+  vencimento: string;
+  despesa_fixa_id: string | null;
+  status: "a_pagar" | "paga" | "ignorada";
+  paga_em: string | null;
+  despesa_id: string | null;
+  origem: "site" | "whatsapp" | "fixa";
+  ultimo_aviso_em: string | null;
+  criado_em: string;
+};
+
 export type Database = {
   __InternalSupabase: { PostgrestVersion: "14.18" };
   public: {
@@ -146,11 +170,26 @@ export type Database = {
       decisoes: Tabela<Decisao>;
       decisao_pontos: Tabela<DecisaoPonto>;
       documentos: Tabela<Documento>;
+      contas: Tabela<Conta>;
     };
     Views: { [_ in never]: never };
     Functions: {
       admin_definir_status: {
         Args: { p_usuario: string; p_status: StatusCadastro };
+        Returns: undefined;
+      };
+      pagar_conta: {
+        Args: {
+          p_usuario: string;
+          p_conta: string;
+          p_valor?: number | null;
+          p_data?: string | null;
+          p_origem?: string;
+        };
+        Returns: string;
+      };
+      reabrir_conta: {
+        Args: { p_usuario: string; p_conta: string };
         Returns: undefined;
       };
     };

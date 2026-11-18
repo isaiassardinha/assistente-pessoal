@@ -10,6 +10,7 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
   const itens: Item[] = [
     { href: "/painel", rotulo: "Painel" },
     { href: "/painel/despesas", rotulo: "Despesas" },
+    { href: "/painel/contas", rotulo: "Contas" },
     { href: "/painel/tarefas", rotulo: "Tarefas" },
     { href: "/painel/lembretes", rotulo: "Lembretes" },
     { href: "/painel/cerebro", rotulo: "Cérebro" },
@@ -44,9 +45,7 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
         </nav>
 
         <details className="relative lg:hidden">
-          <summary className="cursor-pointer list-none rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium">
-            Menu
-          </summary>
+          <summary className="cursor-pointer list-none rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium">Menu</summary>
           <div className="absolute right-0 z-10 mt-2 flex w-56 flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg">
             <span className="px-3 py-1 text-xs text-zinc-500">{nome}</span>
             {links}

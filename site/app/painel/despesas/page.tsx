@@ -1,21 +1,14 @@
 import type { Metadata } from "next";
 import { BotaoEnviar } from "@/components/BotaoEnviar";
 import { FormularioAcao } from "@/components/FormularioAcao";
-import { Abrir, Campo, Secao, Selecao } from "@/components/ui";
+import Link from "next/link";
+import { Abrir, Aviso, Campo, Secao, Selecao } from "@/components/ui";
 import { exigirAprovado } from "@/lib/auth/sessao";
 import { formatarData, hojeISO, PERIODOS } from "@/lib/datas";
 import { buscarDespesas, descreverPeriodo, filtrosParaQuery, lerFiltros, somar, totalPorCategoria } from "@/lib/despesas";
 import { formatarReais, valorParaCampo } from "@/lib/dinheiro";
-import {
-  alternarFixa,
-  apagarCategoria,
-  apagarDespesa,
-  apagarFixa,
-  criarCategoria,
-  editarDespesa,
-  renomearCategoria,
-} from "./acoes";
-import { FormularioNovaDespesa, FormularioNovaFixa } from "./Formularios";
+import { apagarCategoria, apagarDespesa, criarCategoria, editarDespesa, renomearCategoria } from "./acoes";
+import { FormularioNovaDespesa } from "./Formularios";
 
 export const metadata: Metadata = { title: "Despesas" };
 
@@ -26,16 +19,17 @@ export default async function Despesas({ searchParams }: PageProps<"/painel/desp
   const hoje = hojeISO();
   const filtros = lerFiltros(await searchParams, hoje);
 
-  const [{ data: categoriasBrutas }, { data: fixasBrutas }, resultado] = await Promise.all([
+  const [{ data: categoriasBrutas }, resultado] = await Promise.all([
     supabase.from("categorias").select("id, nome").order("nome"),
-    supabase.from("despesas_fixas").select("id, descricao, valor, categoria_id, dia_vencimento, ativa").order("dia_vencimento"),
     buscarDespesas(supabase, filtros),
   ]);
 
   const categorias = categoriasBrutas ?? [];
   const nomeCategoria = new Map(categorias.map((c) => [c.id, c.nome]));
-  const opcoesCategoria = categorias.map((c) => ({ valor: c.id, rotulo: c.nome }));
-  const fixas = (fixasBrutas ?? []).map((f) => ({ ...f, valor: Number(f.valor) }));
+  const opcoesCategoria = categorias.map((c) => ({
+    valor: c.id,
+    rotulo: c.nome,
+  }));
 
   const { linhas, inicio, fim } = resultado;
   const total = somar(linhas);
@@ -61,14 +55,22 @@ export default async function Despesas({ searchParams }: PageProps<"/painel/desp
             <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-700">
               Filtrar
             </button>
-            <a href={`/painel/despesas/exportar?formato=pdf&${query}`} className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold hover:bg-zinc-50">
+            <a
+              href={`/painel/despesas/exportar?formato=pdf&${query}`}
+              className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold hover:bg-zinc-50"
+            >
               Baixar PDF
             </a>
-            <a href={`/painel/despesas/exportar?formato=csv&${query}`} className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold hover:bg-zinc-50">
+            <a
+              href={`/painel/despesas/exportar?formato=csv&${query}`}
+              className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold hover:bg-zinc-50"
+            >
               Baixar planilha
             </a>
           </div>
-          <p className="text-xs text-zinc-500 sm:col-span-2 lg:col-span-5">As datas “De” e “Até” valem quando o período é “Escolher datas”.</p>
+          <p className="text-xs text-zinc-500 sm:col-span-2 lg:col-span-5">
+            As datas “De” e “Até” valem quando o período é “Escolher datas”.
+          </p>
         </form>
 
         <div className="mt-6 flex flex-wrap items-baseline gap-x-6 gap-y-1">
@@ -94,7 +96,7 @@ export default async function Despesas({ searchParams }: PageProps<"/painel/desp
                   <p className="truncate font-medium text-zinc-900">{d.descricao || nomeCategoria.get(d.categoria_id)}</p>
                   <p className="text-sm text-zinc-500">
                     {formatarData(d.data)} · {nomeCategoria.get(d.categoria_id) ?? "?"}
-                    {d.origem === "whatsapp" ? " · pelo WhatsApp" : d.origem === "fixa" ? " · despesa fixa" : ""}
+                    {d.origem === "whatsapp" ? " · pelo WhatsApp" : d.origem === "fixa" ? " · conta fixa" : ""}
                   </p>
                 </div>
                 <p className="shrink-0 font-semibold text-zinc-900">{formatarReais(d.valor)}</p>
@@ -128,45 +130,13 @@ export default async function Despesas({ searchParams }: PageProps<"/painel/desp
         ) : null}
       </Secao>
 
-      <Secao
-        titulo="Despesas fixas"
-        descricao="Contas que se repetem todo mês (aluguel, escola…). O lançamento automático no dia certo começa junto com o robô do WhatsApp."
-      >
-        <ul className="divide-y divide-zinc-200">
-          {fixas.length === 0 ? <li className="py-3 text-sm text-zinc-500">Nenhuma despesa fixa cadastrada.</li> : null}
-          {fixas.map((f) => (
-            <li key={f.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-medium text-zinc-900">
-                  {f.descricao} · {formatarReais(f.valor)}
-                  {!f.ativa ? <span className="ml-2 rounded-full bg-zinc-200 px-2 py-0.5 text-xs text-zinc-700">Pausada</span> : null}
-                </p>
-                <p className="text-sm text-zinc-500">
-                  Todo dia {f.dia_vencimento} · {nomeCategoria.get(f.categoria_id) ?? "?"}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <form action={alternarFixa}>
-                  <input type="hidden" name="id" value={f.id} />
-                  <input type="hidden" name="ativa" value={f.ativa ? "nao" : "sim"} />
-                  <BotaoEnviar variante="secundario" enviando="…">
-                    {f.ativa ? "Pausar" : "Reativar"}
-                  </BotaoEnviar>
-                </form>
-                <form action={apagarFixa}>
-                  <input type="hidden" name="id" value={f.id} />
-                  <BotaoEnviar variante="perigo" enviando="…">
-                    Apagar
-                  </BotaoEnviar>
-                </form>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-4 border-t border-zinc-200 pt-4">
-          <FormularioNovaFixa categorias={opcoesCategoria} />
-        </div>
-      </Secao>
+      <Aviso tipo="info">
+        Contas que se repetem todo mês (aluguel, luz, escola…) agora ficam em{" "}
+        <Link href="/painel/contas" className="font-semibold underline">
+          Contas
+        </Link>
+        : lá o assistente avisa os vencimentos e, quando você paga, o gasto entra aqui sozinho.
+      </Aviso>
 
       <Secao titulo="Categorias" descricao="O assistente só aceita estas categorias e nunca inventa outra.">
         <ul className="divide-y divide-zinc-200">

@@ -1,6 +1,8 @@
 // Rotinas automáticas (a cada minuto): lembretes, aviso de cadastro novo
 // para o administrador e boas-vindas para quem foi aprovado.
 
+import { hojeISO, instanteParaLocal } from "@/lib/datas";
+import { montarAvisoContas } from "./avisoContas";
 import * as banco from "./banco";
 import { indexarAnotacoes, processarDocumento } from "./cerebro";
 import { IaIndisponivel } from "./ia";
@@ -85,14 +87,53 @@ async function rodar() {
     await enviarLembretes();
     await avisarCadastrosNovos();
     await darBoasVindas();
+    await cuidarDasContas();
     if (Date.now() - ultimaLimpeza > 3_600_000) {
       ultimaLimpeza = Date.now();
       await banco.limparRegistrosAntigos();
     }
   } catch (e) {
-    log.erro("rotina:", (e as Error).message);
+    log.erro("rotina:", e);
   } finally {
     rodando = false;
+  }
+}
+
+// ------------------------------------------------------------ contas a pagar
+
+let contasGeradasEm = "";
+let ultimaOlhadaContas = 0;
+
+/** Uma vez por dia cria as contas do mês (contas fixas); a cada 5 minutos,
+ *  entre a hora escolhida pela pessoa e as 21h, manda os avisos do dia. */
+async function cuidarDasContas() {
+  const hoje = hojeISO();
+  if (contasGeradasEm !== hoje) {
+    const n = await banco.gerarContasDoMes(hoje);
+    contasGeradasEm = hoje;
+    if (n > 0) log.info(`contas do mês criadas: ${n}`);
+  }
+  if (Date.now() - ultimaOlhadaContas < 5 * 60_000) return;
+  ultimaOlhadaContas = Date.now();
+  const hora = Number(instanteParaLocal(new Date().toISOString()).slice(11, 13));
+  if (hora < 6 || hora >= 21) return;
+
+  const lista = await banco.contasParaAvisar(hoje, hora);
+  const porPessoa = new Map<string, banco.ContaParaAvisar[]>();
+  for (const c of lista) porPessoa.set(c.usuario_id, [...(porPessoa.get(c.usuario_id) ?? []), c]);
+
+  for (const contas of porPessoa.values()) {
+    const celular = contas[0].celular;
+    if (!numeroPermitido(celular, config.numerosPermitidos)) continue;
+    try {
+      await enviarTexto(celular, montarAvisoContas(contas, hoje));
+      await banco.marcarContasAvisadas(
+        contas.map((c) => c.conta_id),
+        hoje,
+      );
+    } catch (e) {
+      log.aviso("aviso de contas não enviado:", e);
+    }
   }
 }
 

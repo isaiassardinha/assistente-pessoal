@@ -135,6 +135,9 @@ insert into public.decisao_pontos (usuario_id, decisao_id, tipo, texto) values
   ('00000000-0000-4000-a000-00000000b001', '00000000-0000-4000-b000-000000000004', 'pro', 'carro novo gasta menos');
 insert into public.documentos (usuario_id, nome_arquivo, caminho, tamanho_bytes) values
   ('00000000-0000-4000-a000-00000000b001', 'contrato.pdf', '00000000-0000-4000-a000-00000000b001/contrato.pdf', 1000);
+insert into public.contas (id, usuario_id, descricao, valor, categoria_id, vencimento)
+select '00000000-0000-4000-b000-000000000005', '00000000-0000-4000-a000-00000000b001', 'Internet do Bruno', 120, id, '2026-03-20'
+  from public.categorias where usuario_id = '00000000-0000-4000-a000-00000000b001' and nome = 'Contas';
 insert into public.mensagens_conversa (usuario_id, papel, conteudo) values ('00000000-0000-4000-a000-00000000b001', 'usuario', 'oi');
 insert into public.codigos_verificacao (usuario_id, celular, codigo_hash, expira_em)
   values ('00000000-0000-4000-a000-00000000b001', '5511922222222', 'x', now() + interval '10 minutes');
@@ -154,7 +157,7 @@ declare
 begin
   foreach t in array array[
     'categorias', 'despesas_fixas', 'despesas', 'orcamentos', 'alertas_orcamento', 'tarefas',
-    'lembretes', 'memorias', 'decisoes', 'decisao_pontos', 'documentos'
+    'lembretes', 'memorias', 'decisoes', 'decisao_pontos', 'documentos', 'contas'
   ] loop
     perform testes.ok(
       testes.linhas(format('select 1 from public.%I where usuario_id = %L', t, '00000000-0000-4000-a000-00000000b001')) = 0,
@@ -162,8 +165,8 @@ begin
     if t <> 'alertas_orcamento' then
       perform testes.ok(
         testes.linhas(format('update public.%I set %I = %I where usuario_id = %L', t,
-          case t when 'documentos' then 'descricao' when 'memorias' then 'texto' else 'usuario_id' end,
-          case t when 'documentos' then 'descricao' when 'memorias' then 'texto' else 'usuario_id' end,
+          case t when 'documentos' then 'descricao' when 'contas' then 'descricao' when 'memorias' then 'texto' else 'usuario_id' end,
+          case t when 'documentos' then 'descricao' when 'contas' then 'descricao' when 'memorias' then 'texto' else 'usuario_id' end,
           '00000000-0000-4000-a000-00000000b001')) = 0,
         format('Ana não ALTERA %s do Bruno', t));
       perform testes.ok(
@@ -181,7 +184,7 @@ declare
 begin
   foreach t in array array[
     'categorias', 'despesas_fixas', 'despesas', 'orcamentos', 'alertas_orcamento', 'tarefas',
-    'lembretes', 'memorias', 'decisoes', 'decisao_pontos', 'documentos'
+    'lembretes', 'memorias', 'decisoes', 'decisao_pontos', 'documentos', 'contas'
   ] loop
     perform testes.ok(
       testes.linhas(format('select 1 from public.%I where usuario_id = %L', t, '00000000-0000-4000-a000-00000000b001')) >= 1,
@@ -535,6 +538,146 @@ select testes.ok(
   not has_function_privilege('authenticated', 'public.buscar_trechos(uuid, extensions.vector, integer)', 'execute')
   and not has_function_privilege('anon', 'public.buscar_trechos(uuid, extensions.vector, integer)', 'execute'),
   'busca pelo sentido fechada para usuários');
+
+-- ---------------------------------------------------------------------
+-- 10d. CONTAS A PAGAR
+-- ---------------------------------------------------------------------
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.deve_bloquear(
+  $q$insert into public.contas (usuario_id, descricao, valor, categoria_id, vencimento)
+     values ('00000000-0000-4000-a000-00000000a001', 'x', 10,
+       (select id from public.categorias where usuario_id = '00000000-0000-4000-a000-00000000b001' limit 1), '2026-03-01')$q$,
+  'Ana não usa categoria do Bruno numa conta');
+select testes.deve_bloquear(
+  $q$select public.pagar_conta('00000000-0000-4000-a000-00000000b001', '00000000-0000-4000-b000-000000000005', 120)$q$,
+  'Ana não paga conta em nome do Bruno');
+select testes.deve_bloquear(
+  $q$select public.pagar_conta('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-b000-000000000005', 120)$q$,
+  'Ana não paga a conta do Bruno nem dizendo que é dela');
+select testes.deve_bloquear(
+  $q$select public.reabrir_conta('00000000-0000-4000-a000-00000000b001', '00000000-0000-4000-b000-000000000005')$q$,
+  'Ana não mexe no pagamento do Bruno');
+
+insert into public.contas (id, usuario_id, descricao, valor, categoria_id, vencimento)
+select '00000000-0000-4000-a200-000000000001', '00000000-0000-4000-a000-00000000a001', 'Luz', null, id, '2026-03-10'
+  from public.categorias where nome = 'Contas';
+select testes.ok((select status from public.contas where id = '00000000-0000-4000-a200-000000000001') = 'a_pagar', 'conta nova entra como a pagar');
+select testes.deve_bloquear(
+  $q$update public.contas set status = 'paga' where id = '00000000-0000-4000-a200-000000000001'$q$,
+  'marcar como paga só pela função (que lança o gasto)');
+select testes.deve_bloquear(
+  $q$update public.contas set ultimo_aviso_em = '2026-01-01' where id = '00000000-0000-4000-a200-000000000001'$q$,
+  'Ana não mexe no controle de avisos');
+select testes.deve_bloquear(
+  $q$update public.contas set despesa_id = '00000000-0000-4000-b000-000000000002' where id = '00000000-0000-4000-a200-000000000001'$q$,
+  'Ana não liga a conta a um gasto direto');
+select testes.deve_bloquear(
+  $q$select public.pagar_conta('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a200-000000000001')$q$,
+  'conta sem valor não é paga sem dizer o valor');
+select testes.ok(
+  testes.linhas($q$update public.contas set status = 'ignorada' where id = '00000000-0000-4000-a200-000000000001'$q$) = 1
+  and testes.linhas($q$update public.contas set status = 'a_pagar' where id = '00000000-0000-4000-a200-000000000001'$q$) = 1,
+  'Ana ignora uma conta e volta atrás');
+
+select set_config('testes.despesa', public.pagar_conta('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a200-000000000001', 287.40)::text, true);
+select testes.ok(
+  (select status = 'paga' and valor = 287.40 and paga_em is not null and despesa_id::text = current_setting('testes.despesa')
+     from public.contas where id = '00000000-0000-4000-a200-000000000001'),
+  'pagar marca a conta como paga com o valor');
+select testes.ok(
+  (select count(*) from public.despesas where id::text = current_setting('testes.despesa') and valor = 287.40 and descricao = 'Luz') = 1,
+  'pagar lança o gasto em despesas');
+select testes.ok(
+  public.pagar_conta('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a200-000000000001', 999)::text = current_setting('testes.despesa')
+  and (select count(*) from public.despesas where descricao = 'Luz') = 1,
+  'pagar de novo não lança o gasto duas vezes');
+delete from public.despesas where id::text = current_setting('testes.despesa');
+select testes.ok(
+  (select status = 'a_pagar' and paga_em is null and despesa_id is null from public.contas where id = '00000000-0000-4000-a200-000000000001'),
+  'apagar o gasto faz a conta voltar para "a pagar"');
+select public.pagar_conta('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a200-000000000001');
+select public.reabrir_conta('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a200-000000000001');
+select testes.ok(
+  (select status from public.contas where id = '00000000-0000-4000-a200-000000000001') = 'a_pagar'
+  and (select count(*) from public.despesas where descricao = 'Luz') = 0,
+  'desfazer o pagamento apaga o gasto e reabre a conta');
+
+insert into public.despesas_fixas (id, usuario_id, descricao, valor, categoria_id, dia_vencimento)
+select '00000000-0000-4000-a200-000000000002', '00000000-0000-4000-a000-00000000a001', 'Água', null, id, 28
+  from public.categorias where nome = 'Contas';
+select testes.ok(
+  (select count(*) from public.contas where despesa_fixa_id = '00000000-0000-4000-a200-000000000002'
+      and vencimento = privado.vencimento_no_mes((date_trunc('month', privado.hoje_sp()) + interval '1 month')::date, 28)) = 1,
+  'conta fixa gera sozinha a conta do mês seguinte');
+update public.despesas_fixas set valor = 150 where id = '00000000-0000-4000-a200-000000000002';
+select testes.ok(
+  (select bool_and(valor = 150) from public.contas where despesa_fixa_id = '00000000-0000-4000-a200-000000000002' and status = 'a_pagar'),
+  'mudar o valor da conta fixa atualiza as contas ainda não pagas');
+update public.contas set valor = 200 where despesa_fixa_id = '00000000-0000-4000-a200-000000000002';
+update public.despesas_fixas set valor = 175 where id = '00000000-0000-4000-a200-000000000002';
+select testes.ok(
+  (select bool_and(valor = 200) from public.contas where despesa_fixa_id = '00000000-0000-4000-a200-000000000002'),
+  'valor ajustado no mês ("a água deu 200") não é sobrescrito');
+update public.despesas_fixas set ativa = false where id = '00000000-0000-4000-a200-000000000002';
+select testes.ok(
+  (select count(*) from public.contas where despesa_fixa_id = '00000000-0000-4000-a200-000000000002' and vencimento >= privado.hoje_sp()) = 0,
+  'pausar a conta fixa tira as contas futuras não pagas');
+
+select testes.como('00000000-0000-4000-a000-00000000c001');
+select testes.deve_bloquear(
+  $q$select public.pagar_conta('00000000-0000-4000-a000-00000000c001', '00000000-0000-4000-a200-000000000001', 10)$q$,
+  'cadastro pendente não paga conta');
+
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.deve_bloquear($q$select * from public.contas_para_avisar('2026-03-10', 9)$q$, 'Ana não vê a lista de avisos');
+select testes.deve_bloquear($q$select public.gerar_contas_do_mes()$q$, 'Ana não roda a geração de contas de todos');
+select testes.deve_bloquear($q$select public.marcar_contas_avisadas(array['00000000-0000-4000-b000-000000000005']::uuid[], '2026-03-10')$q$, 'Ana não mexe nos avisos');
+select testes.deve_bloquear($q$select privado.gerar_contas()$q$, 'Ana não chama a geração interna');
+
+select testes.como_dono_do_banco();
+insert into public.despesas_fixas (id, usuario_id, descricao, valor, categoria_id, dia_vencimento, criado_em)
+select '00000000-0000-4000-b200-000000000001', '00000000-0000-4000-a000-00000000b001', 'T-Condomínio', 800, id, 31, '2025-12-01'
+  from public.categorias where usuario_id = '00000000-0000-4000-a000-00000000b001' and nome = 'Moradia';
+select testes.ok(privado.gerar_contas('00000000-0000-4000-b200-000000000001', '2026-02-10') = 2, 'gera o mês atual e o próximo');
+select testes.ok(
+  (select array_agg(vencimento order by vencimento) from public.contas
+    where despesa_fixa_id = '00000000-0000-4000-b200-000000000001' and vencimento < '2026-04-01') = array['2026-02-28', '2026-03-31']::date[],
+  'dia 31 em fevereiro vira o último dia do mês');
+select testes.ok(privado.gerar_contas('00000000-0000-4000-b200-000000000001', '2026-02-10') = 0, 'rodar de novo não duplica');
+update public.contas set status = 'ignorada' where despesa_fixa_id = '00000000-0000-4000-b200-000000000001' and vencimento = '2026-02-28';
+select testes.ok(privado.gerar_contas('00000000-0000-4000-b200-000000000001', '2026-02-10') = 0, 'conta ignorada no mês não volta');
+
+insert into public.contas (usuario_id, descricao, valor, categoria_id, vencimento)
+select '00000000-0000-4000-a000-00000000b001', d.descricao, 100, c.id, d.venc::date
+  from public.categorias c,
+       (values ('T-antes', '2026-03-13'), ('T-hoje', '2026-03-10'), ('T-atrasada', '2026-03-08'), ('T-longe', '2026-03-12')) as d(descricao, venc)
+ where c.usuario_id = '00000000-0000-4000-a000-00000000b001' and c.nome = 'Contas';
+
+select testes.como_servidor();
+select testes.ok(
+  (select count(*) from public.contas_para_avisar('2026-03-10', 7) where descricao like 'T-%') = 0,
+  'antes das 8h não avisa');
+select testes.ok(
+  (select array_agg(descricao || ':' || tipo order by descricao) from public.contas_para_avisar('2026-03-10', 9) where descricao like 'T-%')
+    = array['T-antes:antes', 'T-atrasada:atrasada', 'T-hoje:hoje'],
+  'avisa 3 dias antes, no dia e a atrasada (não a que vence em 2 dias)');
+select public.marcar_contas_avisadas(array(select conta_id from public.contas_para_avisar('2026-03-10', 9) where descricao like 'T-%'), '2026-03-10');
+select testes.ok((select count(*) from public.contas_para_avisar('2026-03-10', 15) where descricao like 'T-%') = 0, 'não repete no mesmo dia');
+select testes.ok(
+  (select count(*) from public.contas_para_avisar('2026-03-11', 9) where descricao = 'T-atrasada') = 0
+  and (select count(*) from public.contas_para_avisar('2026-03-12', 9) where descricao = 'T-atrasada') = 1,
+  'conta atrasada volta a ser avisada a cada 2 dias');
+select testes.ok(
+  (select tipo from public.contas_para_avisar('2026-03-13', 9) where descricao = 'T-antes') = 'hoje',
+  'a que foi avisada antes é avisada de novo no dia');
+update public.contas set status = 'ignorada' where descricao = 'T-atrasada';
+select testes.ok((select count(*) from public.contas_para_avisar('2026-03-20', 9) where descricao = 'T-atrasada') = 0, 'conta ignorada não é cobrada');
+select testes.como_dono_do_banco();
+update public.perfis set celular_verificado = false where id = '00000000-0000-4000-a000-00000000b001';
+select testes.como_servidor();
+select testes.ok((select count(*) from public.contas_para_avisar('2026-03-20', 9) where descricao like 'T-%') = 0, 'sem celular verificado não manda aviso');
+select testes.como_dono_do_banco();
+update public.perfis set celular_verificado = true where id = '00000000-0000-4000-a000-00000000b001';
 
 -- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  dataFoiDita,
+  diaFoiDito,
   textoFoiDito,
   categoriaFoiDita,
   encontrarCategoria,
@@ -50,7 +52,16 @@ describe("categorias", () => {
 
 describe("horário do lembrete", () => {
   it("reconhece horários", () => {
-    for (const t of ["amanhã às 9h", "dia 3 às 14:30", "segunda 8h30", "às 7 da manhã", "meio-dia", "daqui a 10 minutos", "em 2 horas", "hoje de noite"]) {
+    for (const t of [
+      "amanhã às 9h",
+      "dia 3 às 14:30",
+      "segunda 8h30",
+      "às 7 da manhã",
+      "meio-dia",
+      "daqui a 10 minutos",
+      "em 2 horas",
+      "hoje de noite",
+    ]) {
       expect(horaFoiDita([t]), t).toBe(true);
     }
   });
@@ -110,7 +121,9 @@ describe("emojis", () => {
 describe("anotação foi dita pela pessoa", () => {
   it("aceita quando usa as palavras e números da pessoa", () => {
     expect(textoFoiDito("A placa do carro é ABC1D23", ["guarda aí: a placa do meu carro é ABC1D23"])).toBe(true);
-    expect(textoFoiDito("Senha do wi-fi da casa da mãe: flor2024", ["anota que a senha do wifi da casa da minha mãe é flor2024"])).toBe(true);
+    expect(textoFoiDito("Senha do wi-fi da casa da mãe: flor2024", ["anota que a senha do wifi da casa da minha mãe é flor2024"])).toBe(
+      true,
+    );
   });
   it("recusa número ou código que a pessoa não disse", () => {
     expect(textoFoiDito("A placa do carro é ABC1D24", ["a placa do meu carro é ABC1D23"])).toBe(false);
@@ -119,5 +132,27 @@ describe("anotação foi dita pela pessoa", () => {
   it("recusa texto inventado", () => {
     expect(textoFoiDito("Consulta com o cardiologista dia 10", ["guarda isso pra mim"])).toBe(false);
     expect(textoFoiDito("", ["qualquer coisa"])).toBe(false);
+  });
+});
+
+describe("data e dia ditos", () => {
+  const hoje = "2026-11-18"; // quarta
+  it("aceita número do dia, hoje, amanhã e dia da semana", () => {
+    expect(dataFoiDita("2026-11-25", ["vence dia 25"], hoje)).toBe(true);
+    expect(dataFoiDita("2026-12-05", ["vence 05/12"], hoje)).toBe(true);
+    expect(dataFoiDita("2026-11-18", ["vence hoje"], hoje)).toBe(true);
+    expect(dataFoiDita("2026-11-19", ["vence amanhã"], hoje)).toBe(true);
+    expect(dataFoiDita("2026-11-20", ["depois de amanhã"], hoje)).toBe(true);
+    expect(dataFoiDita("2026-11-20", ["vence sexta"], hoje)).toBe(true);
+  });
+  it("recusa data que não foi dita", () => {
+    expect(dataFoiDita("2026-11-25", ["tenho um boleto pra pagar"], hoje)).toBe(false);
+    expect(dataFoiDita("2026-11-19", ["vence hoje"], hoje)).toBe(false);
+    expect(dataFoiDita("2026-11-27", ["vence sexta"], hoje)).toBe(false);
+  });
+  it("dia do mês", () => {
+    expect(diaFoiDito(10, ["todo dia 10"])).toBe(true);
+    expect(diaFoiDito(5, ["vence dia 05"])).toBe(true);
+    expect(diaFoiDito(1, ["todo dia 10"])).toBe(false);
   });
 });
