@@ -47,15 +47,28 @@ rm -rf "$DESTINO"
 como mkdir -p "$DESTINO"
 como bash -c "git -C '$REPO' archive '$NOVA' | tar -x -C '$DESTINO'"
 echo "$NOVA" | como tee "$DESTINO/site/.versao" >/dev/null
+[ -d "$DESTINO/robo" ] && echo "$NOVA" | como tee "$DESTINO/robo/.versao" >/dev/null
 
-# ---- construir o site ------------------------------------------------
-if ! como bash -c "cd '$DESTINO/site' && npm ci --no-audit --no-fund --loglevel=error \
-      && npm test && set -a && . /etc/assistente/site.env && set +a && npm run build"; then
-  log "ERRO ao testar/construir a versão ${NOVA:0:7}. A versão no ar NÃO foi alterada."
+# ---- construir o site e o robô (com os testes) -----------------------
+falhar_construcao() {
+  log "ERRO ao testar/construir $1 da versão ${NOVA:0:7}. A versão no ar NÃO foi alterada."
   echo "$NOVA" > "$ESTADO/versao-com-erro"
   rm -rf "$DESTINO"
   exit 1
+}
+como bash -c "cd '$DESTINO/site' && npm ci --no-audit --no-fund --loglevel=error \
+      && npm test && set -a && . /etc/assistente/site.env && set +a && npm run build" || falhar_construcao "o site"
+if [ -d "$DESTINO/robo" ]; then
+  como bash -c "cd '$DESTINO/robo' && npm ci --no-audit --no-fund --loglevel=error && npm test && npm run build" \
+    || falhar_construcao "o robô"
 fi
+
+# ---- senha interna entre o site e o robô, e pasta de dados do robô ----
+if ! grep -q '^INTERNO_TOKEN=' /etc/assistente/site.env; then
+  echo "INTERNO_TOKEN=$(openssl rand -hex 32)" >> /etc/assistente/site.env
+  log "Senha interna site-robô criada"
+fi
+install -d -m 700 -o "$USUARIO" -g "$USUARIO" "$CASA/dados"
 
 # ---- atualizar configurações do servidor que vêm com a versão --------
 install -m 644 "$DESTINO"/infra/systemd/*.service "$DESTINO"/infra/systemd/*.timer /etc/systemd/system/
@@ -78,10 +91,15 @@ ANTERIOR=""
 [ -L "$ATUAL" ] && ANTERIOR="$(readlink -f "$ATUAL")"
 ln -sfn "$DESTINO" "$ATUAL.novo" && mv -Tf "$ATUAL.novo" "$ATUAL"
 systemctl restart assistente-site 9>&-
+if [ -d "$DESTINO/robo" ]; then
+  systemctl enable assistente-robo >/dev/null 2>&1 || true
+  systemctl restart assistente-robo 9>&-
+fi
 
+responde() { curl -fsS --max-time 3 "$1" 2>/dev/null | grep -q "$NOVA"; }
 no_ar=0
-for _ in $(seq 1 40); do
-  if curl -fsS --max-time 3 http://127.0.0.1:3000/api/saude 2>/dev/null | grep -q "$NOVA"; then
+for _ in $(seq 1 60); do
+  if responde http://127.0.0.1:3000/api/saude && { [ ! -d "$DESTINO/robo" ] || responde http://127.0.0.1:3001/saude; }; then
     no_ar=1; break
   fi
   sleep 1
@@ -104,6 +122,7 @@ else
   if [ -n "$ANTERIOR" ] && [ -d "$ANTERIOR" ]; then
     ln -sfn "$ANTERIOR" "$ATUAL.novo" && mv -Tf "$ATUAL.novo" "$ATUAL"
     systemctl restart assistente-site 9>&-
+    if [ -d "$ANTERIOR/robo" ]; then systemctl restart assistente-robo 9>&-; else systemctl stop assistente-robo 9>&- 2>/dev/null || true; fi
     log "Versão anterior restaurada"
   fi
   rm -rf "$DESTINO"

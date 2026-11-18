@@ -77,6 +77,26 @@ assistente-configurar SUPABASE_PUBLISHABLE_KEY   # troca uma configuração
 Cada pergunta diz onde achar o valor. As chaves secretas não aparecem na tela
 enquanto você cola.
 
-## 5. Reconectar o WhatsApp
+## 5. Robô do WhatsApp
 
-(será preenchido na etapa do robô)
+**Conectar ou reconectar o chip:** no site, entre como administrador e abra
+**WhatsApp** no menu. Se aparecer um QR Code, no celular do robô vá em
+WhatsApp → Dispositivos conectados → Conectar dispositivo e leia o código.
+A página atualiza sozinha e mostra "Conectado ao número…".
+
+**Trocar o chip:** na mesma página, "Desconectar este número" e ler o QR com o celular novo.
+
+**Ver se o robô está rodando** (terminal):
+
+```bash
+systemctl status assistente-robo --no-pager      # está rodando?
+journalctl -u assistente-robo -n 50 --no-pager   # últimas mensagens do robô
+curl -s 127.0.0.1:3001/saude; echo               # versão e situação do WhatsApp
+```
+
+A sessão do WhatsApp fica guardada em `/home/assistente/dados` e sobrevive às
+publicações e reinícios. Se o WhatsApp desconectar pelo celular, o robô apaga a
+sessão e um QR Code novo aparece na página.
+
+**Modo "só números liberados":** `assistente-configurar NUMEROS_PERMITIDOS`
+(números com DDI, separados por vírgula; vazio = todos os aprovados).

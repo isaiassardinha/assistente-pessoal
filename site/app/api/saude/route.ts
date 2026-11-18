@@ -14,8 +14,18 @@ export async function GET() {
     // arquivo só existe no servidor (criado pela publicação)
   }
 
+  // Situação do robô do WhatsApp (sem nenhum dado pessoal)
+  let robo: { versao?: string; whatsapp?: string } = {};
+  try {
+    const r = await fetch(`${process.env.ROBO_URL || "http://127.0.0.1:3001"}/saude`, { signal: AbortSignal.timeout(1500), cache: "no-store" });
+    const dados = (await r.json()) as { versao?: string; whatsapp?: string; faltando?: string[] };
+    robo = { versao: dados.versao, whatsapp: dados.faltando?.length ? "falta configurar" : dados.whatsapp };
+  } catch {
+    robo = { whatsapp: "robô fora do ar" };
+  }
+
   return Response.json(
-    { ok: true, versao, agora: new Date().toISOString() },
+    { ok: true, versao, robo, agora: new Date().toISOString() },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

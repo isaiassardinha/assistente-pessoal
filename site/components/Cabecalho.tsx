@@ -12,8 +12,9 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
     { href: "/painel/despesas", rotulo: "Despesas" },
     { href: "/painel/tarefas", rotulo: "Tarefas" },
     { href: "/painel/lembretes", rotulo: "Lembretes" },
+    { href: "/painel/conta", rotulo: "Minha conta" },
   ];
-  if (admin) itens.push({ href: "/admin", rotulo: "Administração" });
+  if (admin) itens.push({ href: "/admin", rotulo: "Cadastros" }, { href: "/admin/whatsapp", rotulo: "WhatsApp" });
 
   const links = itens.map((i) => (
     <Link key={i.href} href={i.href} className="rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100">
@@ -35,13 +36,13 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
           Assistente Pessoal
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="hidden items-center gap-1 lg:flex">
           {links}
           <span className="mx-2 text-sm text-zinc-500">{nome}</span>
           {botaoSair}
         </nav>
 
-        <details className="relative md:hidden">
+        <details className="relative lg:hidden">
           <summary className="cursor-pointer list-none rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium">
             Menu
           </summary>

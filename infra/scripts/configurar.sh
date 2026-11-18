@@ -22,6 +22,10 @@ VARIAVEIS=(
   "SUPABASE_SECRET_KEY|s|Supabase > Project Settings > API Keys > Secret keys (começa com sb_secret_). Chave mestra: só aqui no servidor."
   "GEMINI_API_KEY|s|Google AI Studio (aistudio.google.com) > Get API key. Com pagamento ativado e teto de gastos."
 )
+# Opcionais: só são perguntadas quando pedidas pelo nome (assistente-configurar NOME)
+OPCIONAIS=(
+  "NUMEROS_PERMITIDOS|n|Opcional. Números com DDI separados por vírgula (ex.: 5511999998888). Vazio = todos os aprovados."
+)
 
 valor_atual() { grep -E "^$1=" "$ARQUIVO" | tail -1 | cut -d= -f2- || true; }
 
@@ -52,7 +56,7 @@ perguntar() {
 
 mudou=0
 if [ $# -ge 1 ]; then
-  for linha in "${VARIAVEIS[@]}"; do
+  for linha in "${VARIAVEIS[@]}" "${OPCIONAIS[@]}"; do
     IFS='|' read -r nome segredo dica <<<"$linha"
     if [ "$nome" = "$1" ]; then perguntar "$nome" "$segredo" "$dica"; mudou=1; fi
   done
@@ -67,6 +71,8 @@ fi
 
 if [ "$mudou" = 1 ]; then
   echo
-  echo "Aplicando (reiniciando o site)…"
-  systemctl restart assistente-site && echo "Pronto."
+  echo "Aplicando (reiniciando o site e o robô)…"
+  systemctl restart assistente-site
+  if systemctl list-unit-files assistente-robo.service >/dev/null 2>&1; then systemctl restart assistente-robo || true; fi
+  echo "Pronto."
 fi

@@ -61,8 +61,11 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
 
       {!perfil.celular_verificado ? (
         <Aviso tipo="info">
-          Seu celular {formatarCelular(perfil.celular)} ainda não foi verificado. A verificação por código no WhatsApp chega
-          junto com o robô.
+          Seu celular {formatarCelular(perfil.celular)} ainda não foi verificado.{" "}
+          <Link href="/painel/conta" className="font-semibold underline">
+            Verificar agora
+          </Link>{" "}
+          para o assistente atender você no WhatsApp.
         </Aviso>
       ) : null}
 

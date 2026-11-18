@@ -434,6 +434,19 @@ select testes.ok(
   'funções do robô e do admin estão fechadas para quem não deve');
 
 -- ---------------------------------------------------------------------
+-- 10b. AVISOS DO ROBÔ: só o servidor lista cadastros a avisar
+-- ---------------------------------------------------------------------
+select testes.ok(
+  not has_function_privilege('authenticated', 'public.cadastros_para_avisar()', 'execute')
+  and not has_function_privilege('anon', 'public.cadastros_para_avisar()', 'execute'),
+  'usuário comum não lista cadastros pendentes');
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.deve_bloquear(
+  $q$update public.perfis set boas_vindas_em = now() where id = '00000000-0000-4000-a000-00000000a001'$q$,
+  'usuário não mexe nos controles de aviso do robô');
+select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa
 -- ---------------------------------------------------------------------
 delete from auth.users where id = '00000000-0000-4000-a000-00000000b001';

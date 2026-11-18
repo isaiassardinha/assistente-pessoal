@@ -76,6 +76,7 @@ caddy version
 passo "Pastas e configurações do assistente"
 id "$USUARIO" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USUARIO"
 install -d -m 755 -o "$USUARIO" -g "$USUARIO" "$CASA/versoes"
+install -d -m 700 -o "$USUARIO" -g "$USUARIO" "$CASA/dados"
 install -d -m 750 -o root -g "$USUARIO" /etc/assistente
 install -d -m 755 /var/lib/assistente
 echo "$DOMINIO" > /etc/assistente/dominio

@@ -64,3 +64,10 @@ export async function exigirAdmin(): Promise<SessaoComPerfil> {
   if (sessao.aal !== "aal2") redirect("/entrar/codigo?proximo=/admin");
   return sessao;
 }
+
+/** Versão sem redirecionar (para rotas que devolvem dados): é admin com 2FA? */
+export async function ehAdminCom2fa(): Promise<boolean> {
+  const sessao = await obterSessao();
+  if (!sessao?.perfil || sessao.perfil.status !== "aprovado" || !sessao.perfil.is_admin) return false;
+  return sessao.aal === "aal2";
+}

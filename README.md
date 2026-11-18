@@ -24,6 +24,15 @@ decisões, documentos e relatórios. Cada pessoa só vê os próprios dados.
   - despesas fixas (cadastrar, pausar, apagar) e categorias (criar, renomear, apagar)
   - tarefas (criar, editar, concluir, reabrir, apagar) e lembretes (criar, editar, cancelar, apagar)
   - painel: gastos do mês por categoria, limite mensal com barra (âmbar 80%, vermelho 100%)
+- **Etapa 5 — Robô do WhatsApp** (`robo/`)
+  - conexão pelo QR Code no site (Administração → WhatsApp), religa sozinho
+  - verificação do celular por código de 6 dígitos (Minha conta)
+  - IA (Gemini 3.1 Flash-Lite) com ferramentas: despesas, tarefas e lembretes por texto ou áudio
+  - o código confere valor, categoria e horário ditos pela pessoa ("nunca adivinhar")
+  - apagar/cancelar vários só com "sim" claro; mensagens repetidas ignoradas; limite por minuto
+  - rotina a cada minuto: lembretes sem duplicar, aviso de cadastro novo ao admin, boas-vindas
+  - todo acesso ao banco em `robo/src/banco.ts`, sempre filtrado pelo dono (teste automático confere)
+  - testes: `cd robo && npm test`
 
 ## Rodar os testes de segurança
 

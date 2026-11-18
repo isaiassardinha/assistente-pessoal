@@ -1,0 +1,22 @@
+[Unit]
+Description=Assistente Pessoal - robô do WhatsApp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=assistente
+Group=assistente
+WorkingDirectory=/home/assistente/atual/robo
+EnvironmentFile=/etc/assistente/site.env
+Environment=NODE_ENV=production
+Environment=PASTA_DADOS=/home/assistente/dados
+Environment=ROBO_PORTA=3001
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
