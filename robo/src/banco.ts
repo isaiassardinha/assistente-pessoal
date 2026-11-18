@@ -718,6 +718,7 @@ export async function concluirDocumento(usuarioId: string, id: string, resumo: s
       processado_em: agora,
       resumo: resumo.slice(0, 600) || null,
       erro: null,
+      erro_detalhe: null,
     })
     .eq("usuario_id", usuarioId)
     .eq("id", id);
@@ -725,13 +726,14 @@ export async function concluirDocumento(usuarioId: string, id: string, resumo: s
 }
 
 /** Erro na leitura: volta para a fila, ou desiste depois de algumas tentativas (ou se não tem jeito). */
-export async function falharDocumento(usuarioId: string, id: string, erro: string, definitivo: boolean) {
+export async function falharDocumento(usuarioId: string, id: string, erro: string, definitivo: boolean, detalhe = "") {
   const { error } = await db()
     .from("documentos")
     .update({
       status: definitivo ? "erro" : "pendente",
       status_em: new Date().toISOString(),
       erro: erro.slice(0, 300),
+      erro_detalhe: detalhe.slice(0, 500) || null,
     })
     .eq("usuario_id", usuarioId)
     .eq("id", id);
@@ -971,4 +973,17 @@ export async function marcarContasAvisadas(ids: string[], hoje: string) {
     p_hoje: hoje,
   });
   falhou("marcar contas avisadas", error);
+}
+
+/** Manda ler de novo um documento que deu erro. */
+export async function relerDocumento(usuarioId: string, id: string): Promise<boolean> {
+  const { data, error } = await db()
+    .from("documentos")
+    .update({ status: "pendente", tentativas: 0, erro: null, erro_detalhe: null, status_em: new Date().toISOString() })
+    .eq("usuario_id", usuarioId)
+    .eq("id", id)
+    .eq("status", "erro")
+    .select("id");
+  falhou("reler documento", error);
+  return (data?.length ?? 0) > 0;
 }

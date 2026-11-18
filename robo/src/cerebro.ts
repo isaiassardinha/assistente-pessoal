@@ -13,6 +13,18 @@ import { pareceEscaneado, quebrarEmTrechos } from "./trechos";
 /** Problema que não se resolve tentando de novo (mensagem vai para a pessoa). */
 export class ArquivoIlegivel extends Error {}
 
+/** Motivo técnico curto (fica guardado para diagnóstico, sem dados do arquivo). */
+function detalheTecnico(e: unknown): string {
+  const partes: string[] = [];
+  let atual: unknown = e;
+  for (let i = 0; atual && i < 3; i++) {
+    const x = atual as { name?: string; message?: string; status?: number; code?: string };
+    partes.push([x.name, x.status ?? x.code, x.message].filter(Boolean).join(" "));
+    atual = (atual as { cause?: unknown }).cause;
+  }
+  return partes.join(" <- ").replace(/AIza[A-Za-z0-9_-]+/g, "[chave]").slice(0, 500);
+}
+
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /** Extrai o texto do arquivo. Fotos e PDFs escaneados são lidos pela IA. */
@@ -69,7 +81,7 @@ export async function processarDocumento(item: { id: string; usuario_id: string;
 
   if (item.status === "processando" && item.tentativas >= banco.MAXIMO_TENTATIVAS_LEITURA) {
     // travou no meio várias vezes (ex.: arquivo que derruba o leitor): desiste
-    await banco.falharDocumento(uid, doc.id, "Não consegui ler este arquivo depois de várias tentativas. Tente enviar de novo.", true);
+    await banco.falharDocumento(uid, doc.id, "Não consegui ler o conteúdo depois de várias tentativas, mas o arquivo continua guardado.", true, "travou várias vezes no meio da leitura");
     return { doc, ok: false as const, erro: "várias tentativas" };
   }
 
@@ -96,7 +108,15 @@ export async function processarDocumento(item: { id: string; usuario_id: string;
     const definitivo = e instanceof ArquivoIlegivel || doc.tentativas >= banco.MAXIMO_TENTATIVAS_LEITURA;
     const mensagem = e instanceof ArquivoIlegivel ? e.message : "Não consegui ler agora; vou tentar de novo em instantes.";
     if (!(e instanceof ArquivoIlegivel)) log.erro("leitura de documento:", e);
-    await banco.falharDocumento(uid, doc.id, definitivo && !(e instanceof ArquivoIlegivel) ? "Não consegui ler este arquivo. Tente enviar de novo." : mensagem, definitivo);
+    await banco.falharDocumento(
+      uid,
+      doc.id,
+      definitivo && !(e instanceof ArquivoIlegivel)
+        ? "Não consegui ler o conteúdo, mas o arquivo continua guardado (dá para baixar e pedir no WhatsApp). Você pode tentar ler de novo."
+        : mensagem,
+      definitivo,
+      detalheTecnico(e),
+    );
     if (e instanceof IaIndisponivel) throw e; // a rotina para e tenta depois
     return { doc, ok: false as const, erro: mensagem, definitivo };
   }

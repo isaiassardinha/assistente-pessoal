@@ -127,6 +127,7 @@ async function tratar(m: MensagemRecebida) {
         ultimaMensagem: texto,
         hoje: hojeISO(),
         enviarArquivo: (dados, nome, mime) => enviarDocumento(m.jidResposta, m.digitos, dados, nome, mime),
+        acordarCerebro,
       }),
     });
 

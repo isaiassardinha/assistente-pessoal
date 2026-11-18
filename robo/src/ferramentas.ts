@@ -32,13 +32,15 @@ export type Contexto = {
   hoje: string; // AAAA-MM-DD em Brasília
   /** Manda um arquivo de volta para a pessoa no WhatsApp. */
   enviarArquivo?: (dados: Buffer, nome: string, mime: string) => Promise<void>;
+  /** Pede ao robô para olhar a fila de leitura agora. */
+  acordarCerebro?: () => void;
 };
 
 const SITUACAO_DOC: Record<string, string> = {
   pendente: "na fila para ler",
   processando: "lendo agora",
   pronto: "lido",
-  erro: "não consegui ler",
+  erro: "não consegui ler o conteúdo (arquivo guardado; dá para enviar)",
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -679,7 +681,9 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
       nome: "buscar_no_cerebro",
       descricao:
         "Procura nas anotações e nos documentos guardados da pessoa (contratos, fotos, PDFs etc.) os trechos ligados à pergunta. " +
-        "Use SEMPRE que a pessoa perguntar algo sobre a vida dela, documentos ou coisas que ela pode ter guardado, antes de dizer que não sabe.",
+        "Use SEMPRE que a pessoa perguntar algo sobre a vida dela, documentos ou coisas que ela pode ter guardado, antes de dizer que não sabe. " +
+        "Os documentos podem estar em qualquer idioma: a busca entende a pergunta em português e acha trechos em outras línguas. " +
+        "Documentos que não puderam ser lidos não aparecem aqui, mas estão em listar_documentos e podem ser enviados.",
       parametros: {
         type: "object",
         properties: {
@@ -816,6 +820,18 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
         const dados = await banco.baixarArquivo(uid, doc.caminho);
         await ctx.enviarArquivo(dados, doc.nome_arquivo, doc.tipo_mime ?? "application/octet-stream");
         return { resultado: "ENVIADO", documento: doc.nome_arquivo };
+      },
+    },
+    {
+      nome: "reler_documento",
+      descricao: "Tenta ler de novo um documento que deu erro na leitura (id de listar_documentos). Avise que vai avisar quando terminar.",
+      parametros: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+      executar: async (a) => {
+        const [id] = ids([a.id]);
+        if (!id) return { resultado: "NÃO EXECUTADO: documento não informado" };
+        const ok = await banco.relerDocumento(uid, id);
+        if (ok) ctx.acordarCerebro?.();
+        return ok ? { resultado: "NA FILA PARA LER DE NOVO" } : { resultado: "NÃO EXECUTADO: documento não encontrado ou não está com erro" };
       },
     },
     {

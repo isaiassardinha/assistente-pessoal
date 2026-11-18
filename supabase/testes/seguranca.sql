@@ -491,9 +491,9 @@ select testes.deve_bloquear(
   $q$select * from public.buscar_trechos('00000000-0000-4000-a000-00000000b001', testes.vetor(1), 5)$q$,
   'Ana não chama a busca (nem para ver o que é do Bruno)');
 select testes.ok(
-  testes.linhas($q$insert into public.documentos (usuario_id, nome_arquivo, caminho, tamanho_bytes)
-     values ('00000000-0000-4000-a000-00000000a001', 'rg.pdf', '00000000-0000-4000-a000-00000000a001/rg.pdf', 500)$q$) = 1,
-  'Ana registra documento na pasta dela');
+  testes.linhas($q$insert into public.documentos (id, usuario_id, nome_arquivo, caminho, tamanho_bytes)
+     values ('00000000-0000-4000-a300-000000000001', '00000000-0000-4000-a000-00000000a001', 'rg.pdf', '00000000-0000-4000-a000-00000000a001/rg.pdf', 500)$q$) = 1,
+  'Ana registra documento na pasta dela (o site escolhe o id)');
 select testes.ok(
   (select status from public.documentos where caminho = '00000000-0000-4000-a000-00000000a001/rg.pdf') = 'pendente',
   'documento novo entra na fila de leitura');
@@ -507,6 +507,17 @@ select testes.deve_bloquear(
 select testes.ok(
   testes.linhas($q$update public.documentos set descricao = 'Meu RG' where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$) = 1,
   'Ana muda a descrição do documento dela');
+select testes.ok(not public.reler_documento('00000000-0000-4000-a300-000000000001'), 'reler só vale para documento com erro');
+select testes.como_servidor();
+update public.documentos set status = 'erro', tentativas = 3, erro = 'x', erro_detalhe = 'y' where id = '00000000-0000-4000-a300-000000000001';
+select testes.como('00000000-0000-4000-a000-00000000b001');
+select testes.ok(not public.reler_documento('00000000-0000-4000-a300-000000000001'), 'Bruno não manda reler documento da Ana');
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select set_config('testes.releu', public.reler_documento('00000000-0000-4000-a300-000000000001')::text, true);
+select testes.ok(current_setting('testes.releu') = 'true'
+  and (select status = 'pendente' and tentativas = 0 and erro is null from public.documentos where id = '00000000-0000-4000-a300-000000000001'),
+  'Ana manda ler de novo um documento dela que deu erro');
+select testes.deve_bloquear($q$update public.documentos set erro_detalhe = 'z'$q$, 'Ana não mexe no motivo técnico');
 select testes.deve_bloquear(
   $q$update public.memorias set indexada = true where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$,
   'Ana não marca anotação como pesquisável');

@@ -46,6 +46,7 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
     { data: lembretes },
     { data: tarefas, count: totalTarefas },
     { data: contasProximas },
+    { data: documentos },
   ] = await Promise.all([
     supabase.from("categorias").select("id, nome").order("nome"),
     supabase.from("despesas").select("valor, categoria_id").gte("data", inicio).lte("data", hoje).limit(10000),
@@ -59,7 +60,17 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
       .lte("vencimento", somarDias(hoje, 7))
       .order("vencimento")
       .limit(8),
+    supabase.from("documentos").select("origem, status").limit(10000),
   ]);
+  const docs = documentos ?? [];
+  const contagemDocs = {
+    total: docs.length,
+    site: docs.filter((d) => d.origem === "site").length,
+    whatsapp: docs.filter((d) => d.origem === "whatsapp").length,
+    lidos: docs.filter((d) => d.status === "pronto").length,
+    lendo: docs.filter((d) => d.status === "pendente" || d.status === "processando").length,
+    erro: docs.filter((d) => d.status === "erro").length,
+  };
 
   const gastos = new Map<string, number>();
   let totalMes = 0;
@@ -175,6 +186,32 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
             </ul>
             <Link href="/painel/contas" className="mt-3 inline-block text-sm font-medium text-emerald-700 hover:underline">
               Ver todas →
+            </Link>
+          </Secao>
+
+          <Secao titulo={`Documentos (${contagemDocs.total})`}>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <dt className="text-zinc-600">Pelo site</dt>
+              <dd className="text-right font-medium text-zinc-900">{contagemDocs.site}</dd>
+              <dt className="text-zinc-600">Pelo WhatsApp</dt>
+              <dd className="text-right font-medium text-zinc-900">{contagemDocs.whatsapp}</dd>
+              <dt className="text-zinc-600">Lidos</dt>
+              <dd className="text-right font-medium text-emerald-700">{contagemDocs.lidos}</dd>
+              {contagemDocs.lendo ? (
+                <>
+                  <dt className="text-zinc-600">Na fila para ler</dt>
+                  <dd className="text-right font-medium text-amber-700">{contagemDocs.lendo}</dd>
+                </>
+              ) : null}
+              {contagemDocs.erro ? (
+                <>
+                  <dt className="text-zinc-600">Não consegui ler</dt>
+                  <dd className="text-right font-medium text-red-700">{contagemDocs.erro}</dd>
+                </>
+              ) : null}
+            </dl>
+            <Link href="/painel/cerebro" className="mt-3 inline-block text-sm font-medium text-emerald-700 hover:underline">
+              Ver documentos →
             </Link>
           </Secao>
 

@@ -72,7 +72,7 @@ async function avisarLeitura(usuarioId: string, r: { doc: banco.Documento; ok: b
   if (!perfil?.celular || !perfil.celular_verificado || !numeroPermitido(perfil.celular, config.numerosPermitidos)) return;
   const texto = r.ok
     ? `📄 Pronto, li "${r.doc.nome_arquivo}".${r.resumo ? `\n${r.resumo}` : ""}\n\nPode me perguntar qualquer coisa sobre ele.`
-    : `Não consegui ler "${r.doc.nome_arquivo}". ${r.erro ?? ""}`.trim();
+    : `Não consegui ler o conteúdo de "${r.doc.nome_arquivo}", mas o arquivo ficou guardado: você pode baixar no site ou me pedir aqui. Se quiser, diga "tenta ler de novo".`;
   try {
     await enviarTexto(perfil.celular, texto);
   } catch (e) {

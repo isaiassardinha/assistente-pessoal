@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { BotaoEnviar } from "@/components/BotaoEnviar";
 import { FormularioAcao } from "@/components/FormularioAcao";
-import { Abrir, Campo, Secao } from "@/components/ui";
+import { Abrir, Secao } from "@/components/ui";
 import { tamanhoLegivel } from "@/lib/arquivos";
 import { exigirAprovado } from "@/lib/auth/sessao";
 import { formatarDataHora } from "@/lib/datas";
-import { apagarAnotacao, apagarDocumento, criarAnotacao, editarAnotacao, editarDescricao } from "./acoes";
+import { apagarAnotacao, criarAnotacao, editarAnotacao } from "./acoes";
 import { EnviarArquivos } from "./EnviarArquivos";
+import { AcoesDocumento } from "./AcoesDocumento";
 import { AtualizarSozinho } from "./AtualizarSozinho";
 import { Pergunta } from "./Pergunta";
 
@@ -16,7 +17,7 @@ const SITUACAO: Record<string, { texto: string; cor: string }> = {
   pendente: { texto: "Na fila para ler", cor: "bg-amber-100 text-amber-900" },
   processando: { texto: "Lendo…", cor: "bg-amber-100 text-amber-900" },
   pronto: { texto: "Pronto", cor: "bg-emerald-100 text-emerald-800" },
-  erro: { texto: "Não consegui ler", cor: "bg-red-100 text-red-800" },
+  erro: { texto: "Não consegui ler (arquivo guardado)", cor: "bg-red-100 text-red-800" },
 };
 
 const CAIXA_TEXTO =
@@ -33,6 +34,14 @@ export default async function Cerebro() {
     supabase.from("memorias").select("id, texto, origem, criado_em").order("criado_em", { ascending: false }).limit(200),
   ]);
   const lendo = (documentos ?? []).some((d) => d.status === "pendente" || d.status === "processando");
+  const docs = documentos ?? [];
+  const contagem = {
+    site: docs.filter((d) => d.origem === "site").length,
+    whatsapp: docs.filter((d) => d.origem === "whatsapp").length,
+    lidos: docs.filter((d) => d.status === "pronto").length,
+    lendo: docs.filter((d) => d.status === "pendente" || d.status === "processando").length,
+    erro: docs.filter((d) => d.status === "erro").length,
+  };
 
   return (
     <div className="space-y-6">
@@ -54,7 +63,7 @@ export default async function Cerebro() {
 
       <Secao
         titulo={`Documentos (${documentos?.length ?? 0})`}
-        descricao={`Espaço usado: ${tamanhoLegivel((documentos ?? []).reduce((t, d) => t + d.tamanho_bytes, 0))} de 1 GB do plano gratuito.`}
+        descricao={`${contagem.site} pelo site · ${contagem.whatsapp} pelo WhatsApp · ${contagem.lidos} lidos${contagem.lendo ? ` · ${contagem.lendo} na fila` : ""}${contagem.erro ? ` · ${contagem.erro} não lidos` : ""}. Espaço usado: ${tamanhoLegivel((documentos ?? []).reduce((t, d) => t + d.tamanho_bytes, 0))} de 1 GB do plano gratuito.`}
       >
         <ul className="divide-y divide-zinc-200">
           {(documentos ?? []).length === 0 ? <li className="py-3 text-sm text-zinc-500">Nenhum documento ainda.</li> : null}
@@ -62,10 +71,11 @@ export default async function Cerebro() {
             const s = SITUACAO[d.status] ?? SITUACAO.pendente;
             return (
               <li key={d.id} className="py-3">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <a href={`/painel/cerebro/baixar/${d.id}`} className="break-all font-medium text-zinc-900 hover:underline" target="_blank" rel="noopener">
                     {d.nome_arquivo}
                   </a>
+                  <AcoesDocumento id={d.id} nome={d.nome_arquivo} descricao={d.descricao} comErro={d.status === "erro"} />
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cor}`}>{s.texto}</span>
                 </div>
                 <p className="text-xs text-zinc-500">
@@ -74,20 +84,6 @@ export default async function Cerebro() {
                 {d.descricao ? <p className="mt-1 text-sm text-zinc-700">{d.descricao}</p> : null}
                 {d.resumo ? <p className="mt-1 text-sm text-zinc-600">{d.resumo}</p> : null}
                 {d.status === "erro" && d.erro ? <p className="mt-1 text-sm text-red-700">{d.erro}</p> : null}
-                <div className="mt-1">
-                  <Abrir rotulo="Editar ou apagar">
-                    <FormularioAcao acao={editarDescricao} rotulo="Salvar descrição" variante="secundario">
-                      <input type="hidden" name="id" value={d.id} />
-                      <Campo rotulo="Descrição" name="descricao" maxLength={1000} defaultValue={d.descricao} />
-                    </FormularioAcao>
-                    <form action={apagarDocumento} className="mt-3 border-t border-zinc-200 pt-3">
-                      <input type="hidden" name="id" value={d.id} />
-                      <BotaoEnviar variante="perigo" enviando="Apagando…">
-                        Apagar documento
-                      </BotaoEnviar>
-                    </form>
-                  </Abrir>
-                </div>
               </li>
             );
           })}

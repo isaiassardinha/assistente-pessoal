@@ -84,6 +84,15 @@ export async function editarDescricao(_a: EstadoFormulario, formulario: FormData
   return { sucesso: "Salvo." };
 }
 
+export async function relerDocumento(formulario: FormData) {
+  const { supabase } = await exigirAprovado();
+  const id = campo(formulario, "id");
+  if (!ehUuid(id)) return;
+  const { data } = await supabase.rpc("reler_documento", { p_documento: id });
+  if (data) await acordarCerebro();
+  atualizar();
+}
+
 export async function apagarDocumento(formulario: FormData) {
   const { supabase } = await exigirAprovado();
   const id = campo(formulario, "id");

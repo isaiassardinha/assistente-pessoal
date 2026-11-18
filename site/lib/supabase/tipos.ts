@@ -135,6 +135,7 @@ export type Documento = {
   tentativas: number;
   resumo: string | null;
   erro: string | null;
+  erro_detalhe: string | null;
   processado_em: string | null;
   criado_em: string;
 };
@@ -187,6 +188,10 @@ export type Database = {
           p_origem?: string;
         };
         Returns: string;
+      };
+      reler_documento: {
+        Args: { p_documento: string };
+        Returns: boolean;
       };
       reabrir_conta: {
         Args: { p_usuario: string; p_conta: string };
