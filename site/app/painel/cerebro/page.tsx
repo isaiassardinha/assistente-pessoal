@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { BotaoEnviar } from "@/components/BotaoEnviar";
 import { FormularioAcao } from "@/components/FormularioAcao";
 import { Abrir, Campo, Secao } from "@/components/ui";
-import { DESCRICAO_TIPOS, EXTENSOES_ACEITAS, tamanhoLegivel } from "@/lib/arquivos";
+import { tamanhoLegivel } from "@/lib/arquivos";
 import { exigirAprovado } from "@/lib/auth/sessao";
 import { formatarDataHora } from "@/lib/datas";
-import { apagarAnotacao, apagarDocumento, criarAnotacao, editarAnotacao, editarDescricao, enviarDocumento } from "./acoes";
+import { apagarAnotacao, apagarDocumento, criarAnotacao, editarAnotacao, editarDescricao } from "./acoes";
+import { EnviarArquivos } from "./EnviarArquivos";
 import { AtualizarSozinho } from "./AtualizarSozinho";
 import { Pergunta } from "./Pergunta";
 
@@ -28,7 +29,7 @@ export default async function Cerebro() {
       .from("documentos")
       .select("id, nome_arquivo, descricao, tamanho_bytes, status, resumo, erro, origem, criado_em")
       .order("criado_em", { ascending: false })
-      .limit(200),
+      .limit(1000),
     supabase.from("memorias").select("id, texto, origem, criado_em").order("criado_em", { ascending: false }).limit(200),
   ]);
   const lendo = (documentos ?? []).some((d) => d.status === "pendente" || d.status === "processando");
@@ -47,26 +48,14 @@ export default async function Cerebro() {
         <Pergunta />
       </Secao>
 
-      <Secao titulo="Enviar documento" descricao={`${DESCRICAO_TIPOS}. Até 20 MB por arquivo.`}>
-        <FormularioAcao acao={enviarDocumento} rotulo="Enviar" enviando="Enviando…">
-          <div className="space-y-1">
-            <label htmlFor="arquivo" className="block text-sm font-medium text-zinc-800">
-              Arquivo
-            </label>
-            <input
-              id="arquivo"
-              name="arquivo"
-              type="file"
-              required
-              accept={EXTENSOES_ACEITAS.map((e) => `.${e}`).join(",")}
-              className="block w-full text-sm text-zinc-700 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-4 file:py-2 file:text-sm file:font-semibold hover:file:bg-zinc-200"
-            />
-          </div>
-          <Campo rotulo="Descrição (opcional)" name="descricao" maxLength={1000} placeholder="Ex.: contrato do apartamento da Rua X" />
-        </FormularioAcao>
+      <Secao titulo="Enviar documentos">
+        <EnviarArquivos />
       </Secao>
 
-      <Secao titulo={`Documentos (${documentos?.length ?? 0})`}>
+      <Secao
+        titulo={`Documentos (${documentos?.length ?? 0})`}
+        descricao={`Espaço usado: ${tamanhoLegivel((documentos ?? []).reduce((t, d) => t + d.tamanho_bytes, 0))} de 1 GB do plano gratuito.`}
+      >
         <ul className="divide-y divide-zinc-200">
           {(documentos ?? []).length === 0 ? <li className="py-3 text-sm text-zinc-500">Nenhum documento ainda.</li> : null}
           {(documentos ?? []).map((d) => {

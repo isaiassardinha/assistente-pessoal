@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caminhoNoCofre, nomeSeguro, tamanhoLegivel, tipoDoArquivo } from "./arquivos";
+import { caminhoNoCofre, MAXIMO_POR_ENVIO, nomeSeguro, pastaDoArquivo, prepararEnvio, tamanhoLegivel, tipoDoArquivo } from "./arquivos";
 
 describe("tipo do arquivo", () => {
   it("aceita os tipos conhecidos", () => {
@@ -36,5 +36,40 @@ describe("nome e caminho no cofre", () => {
     expect(tamanhoLegivel(500)).toBe("500 B");
     expect(tamanhoLegivel(2048)).toBe("2 KB");
     expect(tamanhoLegivel(3 * 1024 * 1024)).toBe("3,0 MB");
+  });
+});
+
+describe("envio de vários arquivos", () => {
+  const arq = (nome: string, tamanho = 1000, tipo = "", caminho = "") => ({ nome, tamanho, tipo, caminho });
+
+  it("separa o que vai e o que fica, com o motivo", () => {
+    const { enviar, ignorados } = prepararEnvio([
+      arq("contrato.pdf", 5000, "application/pdf", "Docs/contrato.pdf"),
+      arq("foto.jpg", 2000, "image/jpeg"),
+      arq(".DS_Store", 10),
+      arq("~$rascunho.docx", 100),
+      arq("Thumbs.db", 100),
+      arq("planilha.xlsx", 100),
+      arq("enorme.pdf", 30 * 1024 * 1024, "application/pdf"),
+      arq("vazio.txt", 0, "text/plain"),
+    ]);
+    expect(enviar.map((a) => a.nome)).toEqual(["contrato.pdf", "foto.jpg"]);
+    expect(ignorados).toEqual([
+      { nome: "planilha.xlsx", motivo: "tipo que ainda não sei ler" },
+      { nome: "enorme.pdf", motivo: "maior que 20 MB" },
+      { nome: "vazio.txt", motivo: "arquivo vazio" },
+    ]);
+  });
+
+  it("tem limite por envio", () => {
+    const muitos = Array.from({ length: MAXIMO_POR_ENVIO + 5 }, (_, i) => arq(`n${i}.txt`, 10, "text/plain"));
+    const { enviar, ignorados } = prepararEnvio(muitos);
+    expect(enviar).toHaveLength(MAXIMO_POR_ENVIO);
+    expect(ignorados).toHaveLength(5);
+  });
+
+  it("pasta de origem", () => {
+    expect(pastaDoArquivo("Contratos/2025/aluguel.pdf")).toBe("Contratos/2025");
+    expect(pastaDoArquivo("aluguel.pdf")).toBe("");
   });
 });

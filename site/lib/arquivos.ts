@@ -72,3 +72,34 @@ export function tamanhoLegivel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
 }
+
+// ------------------------------------------------- envio de vários arquivos
+
+export const MAXIMO_POR_ENVIO = 300;
+
+const DE_SISTEMA = /^(\.|~\$)|^(thumbs\.db|desktop\.ini|icon\r?)$/i;
+
+export type ArquivoEscolhido = { nome: string; tamanho: number; tipo: string; caminho: string };
+export type Ignorado = { nome: string; motivo: string };
+
+/** Pasta de onde o arquivo veio ("Contratos/2025"), ou "" se foi escolhido solto. */
+export function pastaDoArquivo(caminho: string): string {
+  const partes = caminho.split("/").filter(Boolean);
+  return partes.length > 1 ? partes.slice(0, -1).join("/") : "";
+}
+
+/** Separa o que pode ser enviado do que será ignorado (e por quê). */
+export function prepararEnvio<T extends ArquivoEscolhido>(arquivos: T[]): { enviar: T[]; ignorados: Ignorado[] } {
+  const enviar: T[] = [];
+  const ignorados: Ignorado[] = [];
+  for (const a of arquivos) {
+    const rotulo = a.caminho || a.nome;
+    if (DE_SISTEMA.test(a.nome)) continue; // arquivos escondidos do sistema: nem menciona
+    if (a.tamanho === 0) ignorados.push({ nome: rotulo, motivo: "arquivo vazio" });
+    else if (a.tamanho > TAMANHO_MAXIMO) ignorados.push({ nome: rotulo, motivo: "maior que 20 MB" });
+    else if (!tipoDoArquivo(a.nome, a.tipo)) ignorados.push({ nome: rotulo, motivo: "tipo que ainda não sei ler" });
+    else if (enviar.length >= MAXIMO_POR_ENVIO) ignorados.push({ nome: rotulo, motivo: `passou de ${MAXIMO_POR_ENVIO} arquivos neste envio` });
+    else enviar.push(a);
+  }
+  return { enviar, ignorados };
+}

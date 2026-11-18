@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { caminhoNoCofre, DESCRICAO_TIPOS, TAMANHO_MAXIMO, tipoDoArquivo } from "@/lib/arquivos";
+import { caminhoNoCofre, TAMANHO_MAXIMO, tipoDoArquivo } from "@/lib/arquivos";
 import { exigirAprovado } from "@/lib/auth/sessao";
 import { ehUuid } from "@/lib/despesas";
 import { campo, ERRO_GENERICO, type EstadoFormulario } from "@/lib/formularios";
@@ -16,25 +16,40 @@ function atualizar() {
 
 // ---------------------------------------------------------------- documentos
 
-export async function enviarDocumento(_a: EstadoFormulario, formulario: FormData): Promise<EstadoFormulario> {
+export type ResultadoEnvio = { ok: true; repetido: boolean } | { ok: false; erro: string };
+
+/**
+ * Envia UM arquivo (a tela manda um de cada vez, para respeitar o limite de
+ * 20 MB por envio). Arquivo com mesmo nome e tamanho já guardado é pulado.
+ */
+export async function enviarArquivo(formulario: FormData): Promise<ResultadoEnvio> {
   const { supabase, usuarioId } = await exigirAprovado();
   const arquivo = formulario.get("arquivo");
-  if (!(arquivo instanceof File) || arquivo.size === 0) return { erro: "Escolha um arquivo." };
-  if (arquivo.size > TAMANHO_MAXIMO) return { erro: "O arquivo passa de 20 MB. Envie uma versão menor." };
+  if (!(arquivo instanceof File) || arquivo.size === 0) return { ok: false, erro: "arquivo vazio" };
+  if (arquivo.size > TAMANHO_MAXIMO) return { ok: false, erro: "maior que 20 MB" };
   const tipo = tipoDoArquivo(arquivo.name, arquivo.type);
-  if (!tipo) return { erro: `Ainda não sei ler esse tipo de arquivo. Aceito: ${DESCRICAO_TIPOS}.` };
+  if (!tipo) return { ok: false, erro: "tipo que ainda não sei ler" };
   const descricao = campo(formulario, "descricao").slice(0, 1000);
+  const nome = arquivo.name.trim().slice(0, 255) || "arquivo";
+
+  const { data: igual } = await supabase
+    .from("documentos")
+    .select("id")
+    .eq("nome_arquivo", nome)
+    .eq("tamanho_bytes", arquivo.size)
+    .limit(1);
+  if (igual?.length) return { ok: true, repetido: true };
 
   const id = randomUUID();
-  const nome = arquivo.name.trim().slice(0, 255) || "arquivo";
   const caminho = caminhoNoCofre(usuarioId, nome, id, "site");
-
   // o arquivo vai para a pasta da pessoa no cofre (o banco confere a pasta)
   const { error: erroCofre } = await supabase.storage
     .from(COFRE)
     .upload(caminho, Buffer.from(await arquivo.arrayBuffer()), { contentType: tipo, upsert: false });
-  if (erroCofre) return { erro: ERRO_GENERICO };
-
+  if (erroCofre) {
+    console.error("enviar arquivo:", erroCofre.message);
+    return { ok: false, erro: "não consegui guardar" };
+  }
   const { error } = await supabase.from("documentos").insert({
     id,
     usuario_id: usuarioId,
@@ -46,11 +61,16 @@ export async function enviarDocumento(_a: EstadoFormulario, formulario: FormData
   });
   if (error) {
     await supabase.storage.from(COFRE).remove([caminho]);
-    return { erro: ERRO_GENERICO };
+    return { ok: false, erro: "não consegui registrar" };
   }
+  return { ok: true, repetido: false };
+}
+
+/** Fim de um envio: avisa o robô para começar a ler e atualiza a tela. */
+export async function concluirEnvio() {
+  await exigirAprovado();
   await acordarCerebro();
   atualizar();
-  return { sucesso: `"${nome}" enviado. Vou ler agora; em instantes ele fica pronto para perguntas.` };
 }
 
 export async function editarDescricao(_a: EstadoFormulario, formulario: FormData): Promise<EstadoFormulario> {
