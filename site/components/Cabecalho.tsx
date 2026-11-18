@@ -16,7 +16,8 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
     { href: "/painel/cerebro", rotulo: "Cérebro" },
     { href: "/painel/conta", rotulo: "Minha conta" },
   ];
-  if (admin) itens.push({ href: "/admin", rotulo: "Cadastros" }, { href: "/admin/whatsapp", rotulo: "WhatsApp" });
+  if (admin)
+    itens.push({ href: "/admin", rotulo: "Cadastros" }, { href: "/admin/whatsapp", rotulo: "WhatsApp" }, { href: "/admin/consumo", rotulo: "Consumo IA" });
 
   const links = itens.map((i) => (
     <Link key={i.href} href={i.href} className="rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100">

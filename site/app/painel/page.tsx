@@ -46,7 +46,7 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
     { data: lembretes },
     { data: tarefas, count: totalTarefas },
     { data: contasProximas },
-    { data: documentos },
+    contagemDocs,
   ] = await Promise.all([
     supabase.from("categorias").select("id, nome").order("nome"),
     supabase.from("despesas").select("valor, categoria_id").gte("data", inicio).lte("data", hoje).limit(10000),
@@ -60,17 +60,25 @@ export default async function Painel({ searchParams }: PageProps<"/painel">) {
       .lte("vencimento", somarDias(hoje, 7))
       .order("vencimento")
       .limit(8),
-    supabase.from("documentos").select("origem, status").limit(10000),
+    contarDocumentos(),
   ]);
-  const docs = documentos ?? [];
-  const contagemDocs = {
-    total: docs.length,
-    site: docs.filter((d) => d.origem === "site").length,
-    whatsapp: docs.filter((d) => d.origem === "whatsapp").length,
-    lidos: docs.filter((d) => d.status === "pronto").length,
-    lendo: docs.filter((d) => d.status === "pendente" || d.status === "processando").length,
-    erro: docs.filter((d) => d.status === "erro").length,
-  };
+
+  /** Contagens direto no banco (sem trazer as linhas). */
+  async function contarDocumentos() {
+    const contar = async (filtro: (q: ReturnType<typeof base>) => ReturnType<typeof base>) => (await filtro(base())).count ?? 0;
+    function base() {
+      return supabase.from("documentos").select("id", { count: "exact", head: true });
+    }
+    const [total, site, whatsapp, lidos, lendo, erro] = await Promise.all([
+      contar((q) => q),
+      contar((q) => q.eq("origem", "site")),
+      contar((q) => q.eq("origem", "whatsapp")),
+      contar((q) => q.eq("status", "pronto")),
+      contar((q) => q.in("status", ["pendente", "processando"])),
+      contar((q) => q.eq("status", "erro")),
+    ]);
+    return { total, site, whatsapp, lidos, lendo, erro };
+  }
 
   const gastos = new Map<string, number>();
   let totalMes = 0;

@@ -691,6 +691,28 @@ select testes.como_dono_do_banco();
 update public.perfis set celular_verificado = true where id = '00000000-0000-4000-a000-00000000b001';
 
 -- ---------------------------------------------------------------------
+-- 10e. CONSUMO DA IA
+-- ---------------------------------------------------------------------
+select testes.como_servidor();
+insert into public.uso_ia (usuario_id, tipo, modelo, tokens_entrada, tokens_saida, custo_usd) values
+  ('00000000-0000-4000-a000-00000000a001', 'conversa', 'gemini-3.1-flash-lite', 1000, 100, 0.0004),
+  ('00000000-0000-4000-a000-00000000b001', 'leitura', 'gemini-3.1-flash-lite', 5000, 2000, 0.004),
+  (null, 'autoteste', 'gemini-embedding-2', 10, 0, 0.000002);
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.ok((select count(*) from public.uso_ia) = 1, 'Ana vê só o consumo dela');
+select testes.ok((select count(*) from public.resumo_uso_ia('2000-01-01', '2100-01-01')) = 1, 'resumo de consumo da Ana só tem o dela');
+select testes.deve_bloquear($q$insert into public.uso_ia (usuario_id, tipo, modelo) values ('00000000-0000-4000-a000-00000000a001', 'conversa', 'x')$q$, 'Ana não grava consumo');
+select testes.deve_bloquear($q$delete from public.uso_ia$q$, 'Ana não apaga consumo');
+select testes.como('00000000-0000-4000-a000-00000000e001', 'aal1');
+select testes.ok((select count(*) from public.uso_ia where usuario_id is distinct from '00000000-0000-4000-a000-00000000e001') = 0, 'admin sem 2FA não vê o consumo dos outros');
+select testes.como('00000000-0000-4000-a000-00000000e001', 'aal2');
+select testes.ok((select count(*) from public.uso_ia) >= 3, 'admin com 2FA vê o consumo de todos');
+select testes.ok((select count(*) from public.resumo_uso_ia('2000-01-01', '2100-01-01')) >= 3, 'resumo do admin com 2FA tem o de todos');
+select testes.como_anonimo();
+select testes.deve_bloquear('select * from public.uso_ia', 'visitante não vê consumo');
+select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa
 -- ---------------------------------------------------------------------
 delete from auth.users where id = '00000000-0000-4000-a000-00000000b001';

@@ -9,6 +9,7 @@
 import { GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
 import { config } from "./config";
 import { log } from "./log";
+import { estimarTokens, registrarUso, somarUso, type Uso, usoDaResposta } from "./uso";
 
 export class IaIndisponivel extends Error {}
 
@@ -56,6 +57,14 @@ export async function conversar(opcoes: {
   const porNome = new Map(opcoes.ferramentas.map((f) => [f.nome, f]));
   const declaracoes = opcoes.ferramentas.map((f) => ({ name: f.nome, description: f.descricao, parametersJsonSchema: f.parametros }));
 
+  let uso: Uso = { entrada: 0, saida: 0, audio: 0, chamadas: 0 };
+  try {
+    return await rodadas();
+  } finally {
+    registrarUso("conversa", config.geminiModelo, uso);
+  }
+
+  async function rodadas(): Promise<string> {
   for (let rodada = 0; rodada < MAXIMO_DE_RODADAS; rodada++) {
     let resposta;
     try {
@@ -72,6 +81,7 @@ export async function conversar(opcoes: {
     } catch (e) {
       throw traduzirErro(e);
     }
+    uso = somarUso(uso, { ...usoDaResposta(resposta), chamadas: 1 });
 
     const chamadas = resposta.functionCalls ?? [];
     if (chamadas.length === 0) {
@@ -101,6 +111,7 @@ export async function conversar(opcoes: {
     conteudos.push({ role: "user", parts: respostas });
   }
   return "Desculpe, me enrolei aqui. Pode repetir de um jeito mais simples?";
+  }
 }
 
 /** Transforma um áudio em texto. */
@@ -124,6 +135,7 @@ export async function transcreverAudio(audio: Buffer, mime: string): Promise<str
       ],
       config: { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }, temperature: 0 },
     });
+    registrarUso("audio", config.geminiModelo, usoDaResposta(resposta));
     return (resposta.text ?? "").trim();
   } catch (e) {
     throw traduzirErro(e);
@@ -158,6 +170,7 @@ export async function gerarVetores(textos: string[], tipo: "documento" | "pergun
     } catch (e) {
       throw traduzirErro(e);
     }
+    registrarUso("vetores", MODELO_VETORES, { entrada: estimarTokens(lote), saida: 0 });
     const recebidos = (resposta.embeddings ?? []).map((e) => e.values ?? []);
     if (recebidos.length !== lote.length || recebidos.some((v) => v.length !== DIMENSOES)) {
       throw new Error(`vetores: esperava ${lote.length}x${DIMENSOES}, veio ${recebidos.length}`);
@@ -190,6 +203,7 @@ export async function lerArquivoComIA(dados: Buffer, mime: string): Promise<stri
       ],
       config: { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }, temperature: 0, maxOutputTokens: 32000 },
     });
+    registrarUso("leitura", config.geminiModelo, usoDaResposta(resposta));
     return (resposta.text ?? "").trim();
   } catch (e) {
     throw traduzirErro(e);
@@ -219,6 +233,7 @@ export async function resumir(texto: string, nomeArquivo: string): Promise<strin
       ],
       config: { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }, temperature: 0.1, maxOutputTokens: 200 },
     });
+    registrarUso("resumo", config.geminiModelo, usoDaResposta(resposta));
     return (resposta.text ?? "").trim().slice(0, 600);
   } catch (e) {
     throw traduzirErro(e);
@@ -245,6 +260,7 @@ export async function responderComFontes(pergunta: string, trechos: TrechoEncont
         temperature: 0.1,
       },
     });
+    registrarUso("pergunta", config.geminiModelo, usoDaResposta(resposta));
     return (resposta.text ?? "").trim();
   } catch (e) {
     throw traduzirErro(e);

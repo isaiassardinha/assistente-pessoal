@@ -9,6 +9,7 @@ import * as banco from "./banco";
 import { ArquivoGrandeDemais, gerarVetores, IaIndisponivel, lerArquivoComIA, MAXIMO_LEITURA_IA, resumir, type TrechoEncontrado } from "./ia";
 import { log } from "./log";
 import { normalizarTexto, pareceEscaneado, quebrarEmTrechos } from "./trechos";
+import { comUso } from "./uso";
 
 /** Problema que não se resolve tentando de novo (mensagem vai para a pessoa). */
 export class ArquivoIlegivel extends Error {}
@@ -74,7 +75,11 @@ export async function extrairTexto(dados: Buffer, mime: string): Promise<string>
 }
 
 /** Lê um documento da fila: extrai texto, resume, quebra em trechos e grava os vetores. */
-export async function processarDocumento(item: { id: string; usuario_id: string; status: string; status_em: string; tentativas: number }) {
+export function processarDocumento(item: { id: string; usuario_id: string; status: string; status_em: string; tentativas: number }) {
+  return comUso(item.usuario_id, () => lerDocumento(item));
+}
+
+async function lerDocumento(item: { id: string; usuario_id: string; status: string; status_em: string; tentativas: number }) {
   const uid = item.usuario_id;
   const doc = await banco.reservarDocumento(uid, item);
   if (!doc) return null; // outro processo pegou
@@ -125,10 +130,14 @@ export async function processarDocumento(item: { id: string; usuario_id: string;
 /** Deixa pesquisáveis as anotações novas ou editadas. */
 export async function indexarAnotacoes(limite = 30): Promise<number> {
   const lista = await banco.anotacoesParaIndexar(limite);
-  if (lista.length === 0) return 0;
-  const vetores = await gerarVetores(lista.map((a) => a.texto), "documento", "Anotação pessoal");
-  for (const [i, a] of lista.entries()) {
-    await banco.indexarAnotacao(a.usuario_id, a.id, a.texto, vetores[i]);
+  // agrupa por pessoa para o consumo de IA ficar na conta certa
+  const porPessoa = new Map<string, typeof lista>();
+  for (const a of lista) porPessoa.set(a.usuario_id, [...(porPessoa.get(a.usuario_id) ?? []), a]);
+  for (const [usuarioId, notas] of porPessoa) {
+    await comUso(usuarioId, async () => {
+      const vetores = await gerarVetores(notas.map((a) => a.texto), "documento", "Anotação pessoal");
+      for (const [i, a] of notas.entries()) await banco.indexarAnotacao(a.usuario_id, a.id, a.texto, vetores[i]);
+    });
   }
   return lista.length;
 }

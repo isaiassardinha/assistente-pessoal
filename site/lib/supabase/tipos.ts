@@ -189,6 +189,18 @@ export type Database = {
         };
         Returns: string;
       };
+      resumo_uso_ia: {
+        Args: { p_de: string; p_ate: string };
+        Returns: {
+          dia: string;
+          usuario_id: string | null;
+          tipo: string;
+          chamadas: number;
+          tokens_entrada: number;
+          tokens_saida: number;
+          custo_usd: number;
+        }[];
+      };
       reler_documento: {
         Args: { p_documento: string };
         Returns: boolean;

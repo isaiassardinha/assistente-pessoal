@@ -12,6 +12,7 @@ import { buscar } from "./cerebro";
 import { IaIndisponivel, responderComFontes } from "./ia";
 import { gerarCodigo, hashCodigo, LimitadorPorMinuto, numeroPermitido } from "./regras";
 import { acordarCerebro } from "./rotinas";
+import { comUso } from "./uso";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -142,7 +143,7 @@ export function iniciarApiInterna() {
         const usuarioId = String(corpo.usuarioId ?? "");
         const pergunta = String(corpo.pergunta ?? "").trim().slice(0, 500);
         if (!UUID.test(usuarioId) || pergunta.length < 2) return json(res, 400, { ok: false, erro: "Escreva a pergunta." });
-        return json(res, 200, await perguntar(usuarioId, pergunta));
+        return json(res, 200, await comUso(usuarioId, () => perguntar(usuarioId, pergunta)));
       }
       return json(res, 404, { ok: false, erro: "não encontrado" });
     } catch (e) {

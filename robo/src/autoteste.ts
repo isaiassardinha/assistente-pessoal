@@ -7,6 +7,7 @@ import { configuracoesFaltando } from "./config";
 import { extrairTexto } from "./cerebro";
 import { gerarVetores, responderComFontes } from "./ia";
 import { log } from "./log";
+import { comUso } from "./uso";
 
 type Resultado = "ok" | "falhou" | "não testado";
 const estado: { conversa: Resultado; vetores: Resultado; pdf: Resultado; em: string | null } = {
@@ -30,7 +31,11 @@ async function testar(nome: "conversa" | "vetores" | "pdf", passo: () => Promise
   }
 }
 
-export async function rodarAutoteste() {
+export function rodarAutoteste() {
+  return comUso(null, testarTudo, "autoteste");
+}
+
+async function testarTudo() {
   if (configuracoesFaltando().length > 0) return;
   await testar("pdf", async () => {
     const pdf = await PDFDocument.create();

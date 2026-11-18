@@ -11,6 +11,7 @@ import { conversar, IaIndisponivel, transcreverAudio, type Turno } from "./ia";
 import { log } from "./log";
 import { LimitadorPorMinuto, limitarEmojis, numeroPermitido } from "./regras";
 import { acordarCerebro } from "./rotinas";
+import { comUso } from "./uso";
 import { digitando, enviarDocumento, enviarTexto, marcarComoLida, type MensagemRecebida } from "./whatsapp";
 
 const DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
@@ -75,6 +76,11 @@ async function tratar(m: MensagemRecebida) {
   if (!numeroPermitido(m.digitos, config.numerosPermitidos)) return;
   const usuario = await banco.acharUsuarioPorCelular(m.digitos);
   if (!usuario) return; // número não cadastrado/aprovado/verificado: ignora em silêncio
+  // todo consumo de IA desta mensagem fica na conta desta pessoa
+  return comUso(usuario.id, () => atender(m, usuario));
+}
+
+async function atender(m: MensagemRecebida, usuario: banco.Usuario) {
   if (!(await banco.registrarMensagemRecebida(m.id))) return; // repetida
   if (!limitador.permitir(m.digitos)) return;
 

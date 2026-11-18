@@ -987,3 +987,18 @@ export async function relerDocumento(usuarioId: string, id: string): Promise<boo
   falhou("reler documento", error);
   return (data?.length ?? 0) > 0;
 }
+
+// ============================================================ CONSUMO DA IA
+
+export async function registrarUsoIa(u: {
+  usuario_id: string | null;
+  tipo: string;
+  modelo: string;
+  chamadas: number;
+  tokens_entrada: number;
+  tokens_saida: number;
+  custo_usd: number;
+}) {
+  const { error } = await db().from("uso_ia").insert(u);
+  falhou("registrar consumo da IA", error);
+}
