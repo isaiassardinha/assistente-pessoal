@@ -7,7 +7,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import * as banco from "./banco";
 import { config, configuracoesFaltando, versao } from "./config";
 import { log } from "./log";
-import { gerarCodigo, hashCodigo, numeroPermitido } from "./regras";
+import { buscar } from "./cerebro";
+import { IaIndisponivel, responderComFontes } from "./ia";
+import { gerarCodigo, hashCodigo, LimitadorPorMinuto, numeroPermitido } from "./regras";
+import { acordarCerebro } from "./rotinas";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -82,6 +85,26 @@ async function confirmarCodigo(usuarioId: string, codigo: string) {
   return { ok: true };
 }
 
+const limitePerguntas = new LimitadorPorMinuto(10);
+
+/** Pergunta feita na tela "Cérebro" do site. */
+async function perguntar(usuarioId: string, pergunta: string) {
+  const perfil = await banco.perfilParaVerificacao(usuarioId);
+  if (!perfil || perfil.status !== "aprovado") return { ok: false, erro: "Cadastro não aprovado." };
+  if (!limitePerguntas.permitir(usuarioId)) return { ok: false, erro: "Muitas perguntas seguidas. Espere um minuto." };
+  try {
+    const { trechos, fontes } = await buscar(usuarioId, pergunta, 8);
+    if (trechos.length === 0) {
+      return { ok: true, resposta: "Não encontrei nada sobre isso nas suas anotações e documentos.", fontes: [] };
+    }
+    const resposta = await responderComFontes(pergunta, trechos, perfil.nome.split(" ")[0]);
+    return { ok: true, resposta: resposta || "Não consegui montar uma resposta agora.", fontes };
+  } catch (e) {
+    if (e instanceof IaIndisponivel) return { ok: false, erro: "A inteligência artificial está instável agora. Tente de novo em instantes." };
+    throw e;
+  }
+}
+
 export function iniciarApiInterna() {
   const servidor = createServer(async (req, res) => {
     try {
@@ -109,9 +132,20 @@ export function iniciarApiInterna() {
         if (codigo.length !== 6) return json(res, 200, { ok: false, erro: "Digite os 6 números do código." });
         return json(res, 200, await confirmarCodigo(usuarioId, codigo));
       }
+      if (rota === "POST /cerebro/acordar") {
+        acordarCerebro();
+        return json(res, 200, { ok: true });
+      }
+      if (rota === "POST /cerebro/perguntar") {
+        const corpo = await lerCorpo(req);
+        const usuarioId = String(corpo.usuarioId ?? "");
+        const pergunta = String(corpo.pergunta ?? "").trim().slice(0, 500);
+        if (!UUID.test(usuarioId) || pergunta.length < 2) return json(res, 400, { ok: false, erro: "Escreva a pergunta." });
+        return json(res, 200, await perguntar(usuarioId, pergunta));
+      }
       return json(res, 404, { ok: false, erro: "não encontrado" });
     } catch (e) {
-      log.erro("api interna:", (e as Error).message);
+      log.erro("api interna:", e);
       return json(res, 500, { ok: false, erro: "Falha no robô. Tente de novo em instantes." });
     }
   });

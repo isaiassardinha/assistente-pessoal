@@ -86,6 +86,8 @@ export type Memoria = {
   id: string;
   usuario_id: string;
   texto: string;
+  indexada: boolean;
+  origem: "site" | "whatsapp";
   criado_em: string;
   atualizado_em: string;
 };
@@ -119,6 +121,13 @@ export type Documento = {
   caminho: string;
   tipo_mime: string | null;
   tamanho_bytes: number;
+  origem: "site" | "whatsapp";
+  status: "pendente" | "processando" | "pronto" | "erro";
+  status_em: string;
+  tentativas: number;
+  resumo: string | null;
+  erro: string | null;
+  processado_em: string | null;
   criado_em: string;
 };
 

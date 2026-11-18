@@ -45,6 +45,24 @@ export function categoriaFoiDita(nomeCategoria: string, textosDaPessoa: string[]
   return textosDaPessoa.some((t) => padrao.test(semAcento(t)));
 }
 
+// -------------------------------------------------------------- anotações
+
+function palavras(texto: string): string[] {
+  return semAcento(texto).match(/[a-z0-9]+/g) ?? [];
+}
+
+/**
+ * A anotação foi realmente dita pela pessoa? Todo número/código precisa
+ * aparecer igualzinho, e a maior parte das palavras importantes também.
+ */
+export function textoFoiDito(texto: string, textosDaPessoa: string[], minimo = 0.6): boolean {
+  const ditas = new Set(textosDaPessoa.flatMap(palavras));
+  const alvo = palavras(texto).filter((p) => p.length >= 3 || /\d/.test(p));
+  if (alvo.length === 0) return false;
+  if (alvo.some((p) => /\d/.test(p) && !ditas.has(p))) return false;
+  return alvo.filter((p) => ditas.has(p)).length / alvo.length >= minimo;
+}
+
 // ------------------------------------------------------------------ horário
 
 /** A pessoa disse um horário? ("9h", "09:30", "às 8", "meio-dia", "daqui a 10 minutos") */

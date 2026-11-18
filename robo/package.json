@@ -15,9 +15,11 @@
     "@google/genai": "^3.4.0",
     "@supabase/supabase-js": "^2.119.0",
     "baileys": "^7.0.0-rc14",
+    "mammoth": "^1.13.0",
     "pdf-lib": "^1.17.1",
     "pino": "^10.4.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "unpdf": "^1.9.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

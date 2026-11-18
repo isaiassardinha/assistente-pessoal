@@ -161,7 +161,10 @@ begin
       format('Ana não LÊ %s do Bruno', t));
     if t <> 'alertas_orcamento' then
       perform testes.ok(
-        testes.linhas(format('update public.%I set usuario_id = usuario_id where usuario_id = %L', t, '00000000-0000-4000-a000-00000000b001')) = 0,
+        testes.linhas(format('update public.%I set %I = %I where usuario_id = %L', t,
+          case t when 'documentos' then 'descricao' when 'memorias' then 'texto' else 'usuario_id' end,
+          case t when 'documentos' then 'descricao' when 'memorias' then 'texto' else 'usuario_id' end,
+          '00000000-0000-4000-a000-00000000b001')) = 0,
         format('Ana não ALTERA %s do Bruno', t));
       perform testes.ok(
         testes.linhas(format('delete from public.%I where usuario_id = %L', t, '00000000-0000-4000-a000-00000000b001')) = 0,
@@ -445,6 +448,93 @@ select testes.deve_bloquear(
   $q$update public.perfis set boas_vindas_em = now() where id = '00000000-0000-4000-a000-00000000a001'$q$,
   'usuário não mexe nos controles de aviso do robô');
 select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
+-- 10c. CÉREBRO: trechos pesquisáveis são só do robô e nunca se misturam
+-- ---------------------------------------------------------------------
+-- vetor de teste: "aponta" para a posição pedida
+create function testes.vetor(pos integer) returns extensions.vector
+language sql as $$
+  select (select array_agg(case when i = pos then 1::real else 0.01::real end order by i)
+            from generate_series(1, 768) i)::extensions.vector
+$$;
+
+select testes.como_servidor();
+insert into public.memorias (id, usuario_id, texto, indexada) values
+  ('00000000-0000-4000-a100-000000000001', '00000000-0000-4000-a000-00000000a001', 'A placa do carro da Ana é ANA1B23', true);
+insert into public.trechos (usuario_id, memoria_id, conteudo, vetor) values
+  ('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a100-000000000001', 'A placa do carro da Ana é ANA1B23', testes.vetor(1));
+insert into public.trechos (usuario_id, documento_id, conteudo, vetor)
+  select usuario_id, id, 'Contrato do Bruno: multa de 3 aluguéis', testes.vetor(1)
+    from public.documentos where usuario_id = '00000000-0000-4000-a000-00000000b001';
+
+select testes.ok(
+  (select count(*) from public.buscar_trechos('00000000-0000-4000-a000-00000000a001', testes.vetor(1), 10)) = 1
+  and (select bool_and(conteudo like '%Ana%') from public.buscar_trechos('00000000-0000-4000-a000-00000000a001', testes.vetor(1), 10)),
+  'busca pelo sentido só devolve trechos da própria pessoa');
+select testes.deve_bloquear(
+  $q$insert into public.trechos (usuario_id, documento_id, conteudo, vetor)
+     select '00000000-0000-4000-a000-00000000a001', id, 'x', testes.vetor(2)
+       from public.documentos where usuario_id = '00000000-0000-4000-a000-00000000b001'$q$,
+  'trecho da Ana não pode apontar para documento do Bruno');
+select testes.deve_bloquear(
+  $q$insert into public.trechos (usuario_id, conteudo, vetor)
+     values ('00000000-0000-4000-a000-00000000a001', 'solto', testes.vetor(2))$q$,
+  'trecho sem documento nem anotação é recusado');
+
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.deve_bloquear('select * from public.trechos', 'Ana não lê a tabela de trechos diretamente');
+select testes.deve_bloquear(
+  $q$insert into public.trechos (usuario_id, memoria_id, conteudo, vetor)
+     values ('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-a100-000000000001', 'x', testes.vetor(3))$q$,
+  'Ana não grava trechos');
+select testes.deve_bloquear(
+  $q$select * from public.buscar_trechos('00000000-0000-4000-a000-00000000b001', testes.vetor(1), 5)$q$,
+  'Ana não chama a busca (nem para ver o que é do Bruno)');
+select testes.ok(
+  testes.linhas($q$insert into public.documentos (usuario_id, nome_arquivo, caminho, tamanho_bytes)
+     values ('00000000-0000-4000-a000-00000000a001', 'rg.pdf', '00000000-0000-4000-a000-00000000a001/rg.pdf', 500)$q$) = 1,
+  'Ana registra documento na pasta dela');
+select testes.ok(
+  (select status from public.documentos where caminho = '00000000-0000-4000-a000-00000000a001/rg.pdf') = 'pendente',
+  'documento novo entra na fila de leitura');
+select testes.deve_bloquear(
+  $q$insert into public.documentos (usuario_id, nome_arquivo, caminho, tamanho_bytes, status)
+     values ('00000000-0000-4000-a000-00000000a001', 'y.pdf', '00000000-0000-4000-a000-00000000a001/y.pdf', 5, 'pronto')$q$,
+  'Ana não registra documento já como "lido"');
+select testes.deve_bloquear(
+  $q$update public.documentos set status = 'pronto' where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$,
+  'Ana não muda a situação da leitura');
+select testes.ok(
+  testes.linhas($q$update public.documentos set descricao = 'Meu RG' where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$) = 1,
+  'Ana muda a descrição do documento dela');
+select testes.deve_bloquear(
+  $q$update public.memorias set indexada = true where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$,
+  'Ana não marca anotação como pesquisável');
+select testes.ok(
+  testes.linhas($q$update public.memorias set texto = 'A placa nova da Ana é NOV4A00'
+                   where id = '00000000-0000-4000-a100-000000000001'$q$) = 1,
+  'Ana edita a anotação dela');
+
+select testes.como_servidor();
+select testes.ok(
+  (select count(*) from public.trechos where memoria_id = '00000000-0000-4000-a100-000000000001') = 0
+  and not (select indexada from public.memorias where id = '00000000-0000-4000-a100-000000000001'),
+  'anotação editada perde os trechos antigos e volta para a fila');
+delete from public.documentos where usuario_id = '00000000-0000-4000-a000-00000000b001' and nome_arquivo = 'contrato.pdf';
+select testes.ok(
+  (select count(*) from public.trechos where usuario_id = '00000000-0000-4000-a000-00000000b001') = 0,
+  'apagar o documento apaga os trechos dele');
+insert into public.documentos (usuario_id, nome_arquivo, caminho, tamanho_bytes) values
+  ('00000000-0000-4000-a000-00000000b001', 'contrato.pdf', '00000000-0000-4000-a000-00000000b001/contrato.pdf', 1000);
+
+select testes.como_anonimo();
+select testes.deve_bloquear('select * from public.trechos', 'visitante sem login não lê trechos');
+select testes.como_dono_do_banco();
+select testes.ok(
+  not has_function_privilege('authenticated', 'public.buscar_trechos(uuid, extensions.vector, integer)', 'execute')
+  and not has_function_privilege('anon', 'public.buscar_trechos(uuid, extensions.vector, integer)', 'execute'),
+  'busca pelo sentido fechada para usuários');
 
 -- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa

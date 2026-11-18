@@ -2,6 +2,8 @@
 // para o administrador e boas-vindas para quem foi aprovado.
 
 import * as banco from "./banco";
+import { indexarAnotacoes, processarDocumento } from "./cerebro";
+import { IaIndisponivel } from "./ia";
 import { config, configuracoesFaltando } from "./config";
 import { log } from "./log";
 import { numeroPermitido } from "./regras";
@@ -15,8 +17,65 @@ export function iniciarRotinas() {
   const atraso = 60_000 - (Date.now() % 60_000) + 1000;
   setTimeout(() => {
     void rodar();
-    setInterval(() => void rodar(), 60_000);
+    void cuidarDoCerebro();
+    setInterval(() => {
+      void rodar();
+      void cuidarDoCerebro();
+    }, 60_000);
   }, atraso);
+}
+
+// ------------------------------------------------------------ cérebro
+// Separado das outras rotinas: ler um documento grande pode demorar e não
+// pode atrasar lembretes. Não depende do WhatsApp estar conectado.
+
+let cerebroOcupado = false;
+let chamarDeNovo = false;
+
+/** Pede para olhar a fila agora (ex.: o site acabou de receber um arquivo). */
+export function acordarCerebro() {
+  void cuidarDoCerebro();
+}
+
+async function cuidarDoCerebro() {
+  if (configuracoesFaltando().length > 0) return;
+  if (cerebroOcupado) {
+    chamarDeNovo = true;
+    return;
+  }
+  cerebroOcupado = true;
+  try {
+    do {
+      chamarDeNovo = false;
+      await indexarAnotacoes();
+      const fila = await banco.documentosParaProcessar(3);
+      for (const item of fila) {
+        const r = await processarDocumento(item);
+        if (r && r.doc.origem === "whatsapp" && (r.ok || r.definitivo)) await avisarLeitura(item.usuario_id, r);
+      }
+      if (fila.length === 3) chamarDeNovo = true; // ainda pode ter mais
+    } while (chamarDeNovo);
+  } catch (e) {
+    if (e instanceof IaIndisponivel) log.aviso("cérebro: IA indisponível, tento no próximo minuto");
+    else log.erro("cérebro:", e);
+  } finally {
+    cerebroOcupado = false;
+  }
+}
+
+/** Para arquivos mandados pelo WhatsApp: avisa quando terminou de ler. */
+async function avisarLeitura(usuarioId: string, r: { doc: banco.Documento; ok: boolean; resumo?: string; erro?: string }) {
+  if (!conectado()) return;
+  const perfil = await banco.perfilParaVerificacao(usuarioId);
+  if (!perfil?.celular || !perfil.celular_verificado || !numeroPermitido(perfil.celular, config.numerosPermitidos)) return;
+  const texto = r.ok
+    ? `📄 Pronto, li "${r.doc.nome_arquivo}".${r.resumo ? `\n${r.resumo}` : ""}\n\nPode me perguntar qualquer coisa sobre ele.`
+    : `Não consegui ler "${r.doc.nome_arquivo}". ${r.erro ?? ""}`.trim();
+  try {
+    await enviarTexto(perfil.celular, texto);
+  } catch (e) {
+    log.aviso("aviso de leitura não enviado:", e);
+  }
 }
 
 async function rodar() {
@@ -93,7 +152,9 @@ async function darBoasVindas() {
       '• "gastei 50 no mercado, categoria mercado"\n' +
       '• "quanto gastei este mês?"\n' +
       '• "me lembra amanhã às 9h de pagar a luz"\n' +
-      '• "anota a tarefa: renovar o seguro do carro"\n\n' +
+      '• "anota a tarefa: renovar o seguro do carro"\n' +
+      '• "guarda isso: a placa do carro é ABC1D23"\n' +
+      "• mande um PDF ou foto de documento e depois pergunte sobre ele\n\n" +
       (config.siteUrl ? `Tudo também fica organizado no site: ${config.siteUrl}` : "");
     try {
       await enviarTexto(u.celular, texto);

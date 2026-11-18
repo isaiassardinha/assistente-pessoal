@@ -6,6 +6,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const gravadas: unknown[] = [];
 const pendente: { atual: { tipo: string; dados: { ids: string[]; descricao: string[] } } | null } = { atual: null };
 const apagadas: string[][] = [];
+const anotacoes: string[] = [];
+const documentosApagados: string[][] = [];
+const busca: { trechos: { fonte: string; conteudo: string }[] } = { trechos: [] };
+
+vi.mock("./cerebro", () => ({
+  buscar: async () => ({ trechos: busca.trechos, fontes: [] }),
+}));
 
 vi.mock("./banco", () => ({
   categorias: async () => [
@@ -29,6 +36,17 @@ vi.mock("./banco", () => ({
   apagarAcaoPendente: async () => {
     pendente.atual = null;
   },
+  criarAnotacao: async (_uid: string, texto: string) => {
+    anotacoes.push(texto);
+    return { id: "n1", texto, criado_em: "2026-11-17T10:00:00Z" };
+  },
+  listarDocumentos: async () => [],
+  documentosPorIds: async (_uid: string, ids: string[]) =>
+    ids.map((id) => ({ id, nome_arquivo: `doc-${id.slice(0, 4)}.pdf`, caminho: `u1/site/${id}.pdf`, tipo_mime: "application/pdf" })),
+  apagarDocumentos: async (_uid: string, ids: string[]) => {
+    documentosApagados.push(ids);
+    return ids.length;
+  },
   criarLembrete: async (_uid: string, texto: string, quando: string) => ({ id: "l1", texto, quando, status: "pendente" }),
 }));
 
@@ -48,6 +66,9 @@ beforeEach(() => {
   gravadas.length = 0;
   apagadas.length = 0;
   pendente.atual = null;
+  anotacoes.length = 0;
+  documentosApagados.length = 0;
+  busca.trechos = [];
 });
 
 describe("registrar despesas", () => {
@@ -137,5 +158,49 @@ describe("apagar vários exige confirmação", () => {
   it("ids inventados (fora do formato) são ignorados", async () => {
     const r = (await ferramenta("apagar_despesas", ["apaga"]).executar({ ids: ["abc", "1; drop table"] })) as { resultado: string };
     expect(r.resultado).toMatch(/^NÃO EXECUTADO/);
+  });
+});
+
+describe("cérebro: anotações", () => {
+  it("guarda com as palavras da pessoa", async () => {
+    const r = (await ferramenta("guardar_anotacao", ["guarda isso: a placa do meu carro é ABC1D23"]).executar({ texto: "A placa do carro é ABC1D23" })) as { resultado: string };
+    expect(r.resultado).toBe("GRAVADO");
+    expect(anotacoes).toEqual(["A placa do carro é ABC1D23"]);
+  });
+  it("NÃO guarda se a IA trocou um número", async () => {
+    const r = (await ferramenta("guardar_anotacao", ["a placa do meu carro é ABC1D23"]).executar({ texto: "A placa do carro é ABC1D28" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO GRAVADO/);
+    expect(anotacoes).toHaveLength(0);
+  });
+  it("NÃO guarda informação inventada", async () => {
+    const r = (await ferramenta("guardar_anotacao", ["guarda isso pra mim"]).executar({ texto: "Consulta no dentista dia 12" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO GRAVADO/);
+  });
+});
+
+describe("cérebro: busca", () => {
+  it("sem nada encontrado, manda dizer que não achou (nunca inventar)", async () => {
+    const r = (await ferramenta("buscar_no_cerebro", ["qual a placa do meu carro?"]).executar({ consulta: "placa do carro" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NADA ENCONTRADO/);
+  });
+  it("com trechos, devolve as fontes", async () => {
+    busca.trechos = [{ fonte: "anotação de 17/11", conteudo: "A placa do carro é ABC1D23" }];
+    const r = (await ferramenta("buscar_no_cerebro", ["qual a placa?"]).executar({ consulta: "placa" })) as { resultado: string; trechos: { fonte: string }[] };
+    expect(r.resultado).toMatch(/^ENCONTRADO/);
+    expect(r.trechos[0].fonte).toContain("anotação");
+  });
+});
+
+describe("cérebro: apagar documentos sempre pede confirmação", () => {
+  it("mesmo um só fica aguardando", async () => {
+    const r = (await ferramenta("apagar_documentos", ["apaga o contrato"]).executar({ ids: [ID1] })) as { resultado: string };
+    expect(r.resultado).toMatch(/AGUARDANDO/);
+    expect(documentosApagados).toHaveLength(0);
+  });
+  it("só apaga depois do sim", async () => {
+    await ferramenta("apagar_documentos", ["apaga o contrato"]).executar({ ids: [ID1] });
+    const r = (await ferramenta("confirmar_acao", ["apaga o contrato", "sim"]).executar({})) as { resultado: string };
+    expect(r.resultado).toBe("EXECUTADO");
+    expect(documentosApagados).toEqual([[ID1]]);
   });
 });

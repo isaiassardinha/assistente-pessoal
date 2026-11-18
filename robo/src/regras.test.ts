@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  textoFoiDito,
   categoriaFoiDita,
   encontrarCategoria,
   gerarCodigo,
@@ -103,5 +104,20 @@ describe("limite por minuto", () => {
 describe("emojis", () => {
   it("deixa no máximo 1", () => {
     expect(limitarEmojis("Feito ✅ e pronto 🎉😀")).toBe("Feito ✅ e pronto ");
+  });
+});
+
+describe("anotação foi dita pela pessoa", () => {
+  it("aceita quando usa as palavras e números da pessoa", () => {
+    expect(textoFoiDito("A placa do carro é ABC1D23", ["guarda aí: a placa do meu carro é ABC1D23"])).toBe(true);
+    expect(textoFoiDito("Senha do wi-fi da casa da mãe: flor2024", ["anota que a senha do wifi da casa da minha mãe é flor2024"])).toBe(true);
+  });
+  it("recusa número ou código que a pessoa não disse", () => {
+    expect(textoFoiDito("A placa do carro é ABC1D24", ["a placa do meu carro é ABC1D23"])).toBe(false);
+    expect(textoFoiDito("Tamanho do sapato: 42", ["guarda meu tamanho de sapato"])).toBe(false);
+  });
+  it("recusa texto inventado", () => {
+    expect(textoFoiDito("Consulta com o cardiologista dia 10", ["guarda isso pra mim"])).toBe(false);
+    expect(textoFoiDito("", ["qualquer coisa"])).toBe(false);
   });
 });

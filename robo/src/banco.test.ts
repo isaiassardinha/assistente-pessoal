@@ -19,10 +19,17 @@ const TABELAS_PESSOAIS = [
   "mensagens_conversa",
   "acoes_pendentes",
   "codigos_verificacao",
+  "trechos",
 ];
 
 // Funções que leem perfis/avisos pelo próprio servidor (não são dados de um usuário específico)
-const EXCECOES = new Set(["limparRegistrosAntigos"]);
+const EXCECOES = new Set([
+  "limparRegistrosAntigos",
+  // filas da rotina (olham todas as pessoas, mas só id/situação; o trabalho em si
+  // é feito pelas funções seguintes, que recebem o dono)
+  "anotacoesParaIndexar",
+  "documentosParaProcessar",
+]);
 
 const codigo = readFileSync(path.join(__dirname, "banco.ts"), "utf8");
 const funcoes = codigo.split(/\nexport async function /).slice(1).map((bloco) => {

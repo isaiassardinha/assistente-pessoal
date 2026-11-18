@@ -10,14 +10,14 @@ export type EstadoRobo = {
 
 const ENDERECO = () => process.env.ROBO_URL || "http://127.0.0.1:3001";
 
-async function chamar(caminho: string, metodo: "GET" | "POST", corpo?: unknown): Promise<Response> {
+async function chamar(caminho: string, metodo: "GET" | "POST", corpo?: unknown, espera = 20_000): Promise<Response> {
   const token = process.env.INTERNO_TOKEN ?? "";
   return fetch(`${ENDERECO()}${caminho}`, {
     method: metodo,
     headers: { "x-interno-token": token, "Content-Type": "application/json" },
     body: corpo ? JSON.stringify(corpo) : undefined,
     cache: "no-store",
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(espera),
   });
 }
 
@@ -54,5 +54,29 @@ export async function confirmarCodigo(usuarioId: string, codigo: string): Promis
     return (await (await chamar("/verificacao/confirmar", "POST", { usuarioId, codigo })).json()) as RespostaVerificacao;
   } catch {
     return { ok: false, erro: "O robô do WhatsApp está fora do ar agora. Tente mais tarde." };
+  }
+}
+
+// ------------------------------------------------------------- cérebro
+
+export type Fonte = { tipo: "documento" | "anotacao"; id: string; nome: string };
+export type RespostaPergunta = { ok: boolean; erro?: string; resposta?: string; fontes?: Fonte[] };
+
+/** Pergunta aos documentos e anotações da pessoa (a IA fica no robô). */
+export async function perguntarAoCerebro(usuarioId: string, pergunta: string): Promise<RespostaPergunta> {
+  try {
+    const r = await chamar("/cerebro/perguntar", "POST", { usuarioId, pergunta }, 60_000);
+    return (await r.json()) as RespostaPergunta;
+  } catch {
+    return { ok: false, erro: "O robô está fora do ar agora. Tente de novo em instantes." };
+  }
+}
+
+/** Avisa o robô que chegou arquivo novo (para ler logo, sem esperar o próximo minuto). */
+export async function acordarCerebro(): Promise<void> {
+  try {
+    await chamar("/cerebro/acordar", "POST", {}, 5_000);
+  } catch {
+    // sem problema: a rotina do robô pega no próximo minuto
   }
 }

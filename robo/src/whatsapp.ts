@@ -40,6 +40,8 @@ export type MensagemRecebida = {
   jidResposta: string;
   tipo: "texto" | "audio" | "imagem" | "documento" | "outro";
   texto: string;
+  /** Tamanho anunciado do arquivo (antes de baixar), em bytes; 0 se não souber. */
+  tamanho: number;
   baixarMidia: () => Promise<{ dados: Buffer; mime: string; nome: string | null }>;
 };
 
@@ -199,6 +201,7 @@ async function interpretar(s: WASocket, m: WAMessage): Promise<MensagemRecebida 
     jidResposta: jid,
     tipo,
     texto: texto.trim(),
+    tamanho: Number(conteudo?.imageMessage?.fileLength ?? conteudo?.documentMessage?.fileLength ?? conteudo?.audioMessage?.fileLength ?? 0) || 0,
     baixarMidia: async () => {
       const dados = await downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: s.updateMediaMessage });
       const midia = conteudo?.audioMessage ?? conteudo?.imageMessage ?? conteudo?.documentMessage;

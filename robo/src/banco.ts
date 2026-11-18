@@ -388,3 +388,238 @@ export async function registrarFalhaLembrete(id: string, erro: string) {
   const { error } = await db().rpc("registrar_falha_lembrete", { p_id: id, p_erro: erro });
   falhou("registrar falha", error);
 }
+
+// ============================================================ CÉREBRO
+// Anotações (tabela "memorias"), documentos e trechos pesquisáveis.
+
+const COFRE = "documentos";
+
+function conferirPasta(usuarioId: string, caminho: string) {
+  if (!caminho.startsWith(`${usuarioId}/`) || caminho.includes("..")) throw new Error("arquivo fora da pasta da pessoa");
+}
+
+export type Anotacao = { id: string; texto: string; criado_em: string };
+
+export async function criarAnotacao(usuarioId: string, texto: string): Promise<Anotacao> {
+  const { data, error } = await db()
+    .from("memorias")
+    .insert({ usuario_id: usuarioId, texto, origem: "whatsapp" })
+    .select("id, texto, criado_em")
+    .single();
+  falhou("criar anotação", error);
+  return data as Anotacao;
+}
+
+export async function listarAnotacoes(usuarioId: string, limite = 30): Promise<Anotacao[]> {
+  const { data, error } = await db()
+    .from("memorias")
+    .select("id, texto, criado_em")
+    .eq("usuario_id", usuarioId)
+    .order("criado_em", { ascending: false })
+    .limit(limite);
+  falhou("listar anotações", error);
+  return (data ?? []) as Anotacao[];
+}
+
+export async function anotacoesPorIds(usuarioId: string, ids: string[]): Promise<Anotacao[]> {
+  const { data, error } = await db().from("memorias").select("id, texto, criado_em").eq("usuario_id", usuarioId).in("id", ids);
+  falhou("anotações por id", error);
+  return (data ?? []) as Anotacao[];
+}
+
+export async function editarAnotacao(usuarioId: string, id: string, texto: string): Promise<Anotacao | null> {
+  const { data, error } = await db()
+    .from("memorias")
+    .update({ texto })
+    .eq("usuario_id", usuarioId)
+    .eq("id", id)
+    .select("id, texto, criado_em");
+  falhou("editar anotação", error);
+  return (data?.[0] as Anotacao) ?? null;
+}
+
+export async function apagarAnotacoes(usuarioId: string, ids: string[]): Promise<number> {
+  const { data, error } = await db().from("memorias").delete().eq("usuario_id", usuarioId).in("id", ids).select("id");
+  falhou("apagar anotações", error);
+  return data?.length ?? 0;
+}
+
+/** Anotações que ainda não viraram trechos pesquisáveis (todas as pessoas; só a rotina usa). */
+export async function anotacoesParaIndexar(limite = 30) {
+  const { data, error } = await db()
+    .from("memorias")
+    .select("id, usuario_id, texto")
+    .eq("indexada", false)
+    .order("criado_em")
+    .limit(limite);
+  falhou("anotações a indexar", error);
+  return (data ?? []) as { id: string; usuario_id: string; texto: string }[];
+}
+
+export async function indexarAnotacao(usuarioId: string, id: string, texto: string, vetor: number[]) {
+  // apaga trechos antigos (se houver) e grava o novo; só marca como pronta se o texto não mudou no meio
+  const { error: e1 } = await db().from("trechos").delete().eq("usuario_id", usuarioId).eq("memoria_id", id);
+  falhou("limpar trechos da anotação", e1);
+  const { error: e2 } = await db()
+    .from("trechos")
+    .insert({ usuario_id: usuarioId, memoria_id: id, posicao: 0, conteudo: texto.slice(0, 4000), vetor: JSON.stringify(vetor) });
+  falhou("gravar trecho da anotação", e2);
+  const { error: e3 } = await db().from("memorias").update({ indexada: true }).eq("usuario_id", usuarioId).eq("id", id).eq("texto", texto);
+  falhou("marcar anotação", e3);
+}
+
+// ------------------------------------------------------------ documentos
+
+export type Documento = {
+  id: string;
+  nome_arquivo: string;
+  descricao: string;
+  caminho: string;
+  tipo_mime: string | null;
+  tamanho_bytes: number;
+  status: string;
+  resumo: string | null;
+  origem: string;
+  tentativas: number;
+  criado_em: string;
+};
+
+const CAMPOS_DOCUMENTO = "id, nome_arquivo, descricao, caminho, tipo_mime, tamanho_bytes, status, resumo, origem, tentativas, criado_em";
+
+export async function guardarArquivo(usuarioId: string, caminho: string, dados: Buffer, mime: string) {
+  conferirPasta(usuarioId, caminho);
+  const { error } = await db().storage.from(COFRE).upload(caminho, dados, { contentType: mime, upsert: false });
+  falhou("guardar arquivo", error as never);
+}
+
+export async function baixarArquivo(usuarioId: string, caminho: string): Promise<Buffer> {
+  conferirPasta(usuarioId, caminho);
+  const { data, error } = await db().storage.from(COFRE).download(caminho);
+  falhou("baixar arquivo", error as never);
+  return Buffer.from(await (data as Blob).arrayBuffer());
+}
+
+export async function registrarDocumento(
+  usuarioId: string,
+  doc: { id: string; nome_arquivo: string; descricao: string; caminho: string; tipo_mime: string; tamanho_bytes: number },
+): Promise<Documento> {
+  conferirPasta(usuarioId, doc.caminho);
+  const { data, error } = await db()
+    .from("documentos")
+    .insert({ ...doc, usuario_id: usuarioId, origem: "whatsapp" })
+    .select(CAMPOS_DOCUMENTO)
+    .single();
+  falhou("registrar documento", error);
+  return data as Documento;
+}
+
+export async function listarDocumentos(usuarioId: string, limite = 50): Promise<Documento[]> {
+  const { data, error } = await db()
+    .from("documentos")
+    .select(CAMPOS_DOCUMENTO)
+    .eq("usuario_id", usuarioId)
+    .order("criado_em", { ascending: false })
+    .limit(limite);
+  falhou("listar documentos", error);
+  return (data ?? []) as Documento[];
+}
+
+export async function documentosPorIds(usuarioId: string, ids: string[]): Promise<Documento[]> {
+  const { data, error } = await db().from("documentos").select(CAMPOS_DOCUMENTO).eq("usuario_id", usuarioId).in("id", ids);
+  falhou("documentos por id", error);
+  return (data ?? []) as Documento[];
+}
+
+/** Apaga a ficha (os trechos vão junto) e depois o arquivo do cofre. */
+export async function apagarDocumentos(usuarioId: string, ids: string[]): Promise<number> {
+  const { data, error } = await db().from("documentos").delete().eq("usuario_id", usuarioId).in("id", ids).select("caminho");
+  falhou("apagar documentos", error);
+  const caminhos = ((data ?? []) as { caminho: string }[]).map((d) => d.caminho).filter((c) => c.startsWith(`${usuarioId}/`));
+  if (caminhos.length > 0) await db().storage.from(COFRE).remove(caminhos);
+  return data?.length ?? 0;
+}
+
+// ------------------------------------------ fila de leitura (só a rotina)
+
+const TRAVADO_HA = 15 * 60_000;
+export const MAXIMO_TENTATIVAS_LEITURA = 3;
+
+/** Documentos esperando leitura, ou que travaram no meio (de todas as pessoas). */
+export async function documentosParaProcessar(limite = 3) {
+  const travado = new Date(Date.now() - TRAVADO_HA).toISOString();
+  const { data, error } = await db()
+    .from("documentos")
+    .select("id, usuario_id, status, status_em, tentativas")
+    .or(`status.eq.pendente,and(status.eq.processando,status_em.lt.${travado})`)
+    .order("status_em")
+    .limit(limite);
+  falhou("documentos a processar", error);
+  return (data ?? []) as { id: string; usuario_id: string; status: string; status_em: string; tentativas: number }[];
+}
+
+/** Pega o documento para ler (só se ninguém pegou antes). */
+export async function reservarDocumento(usuarioId: string, d: { id: string; status: string; status_em: string; tentativas: number }) {
+  const { data, error } = await db()
+    .from("documentos")
+    .update({ status: "processando", status_em: new Date().toISOString(), tentativas: d.tentativas + 1, erro: null })
+    .eq("usuario_id", usuarioId)
+    .eq("id", d.id)
+    .eq("status", d.status)
+    .eq("status_em", d.status_em)
+    .select(CAMPOS_DOCUMENTO);
+  falhou("reservar documento", error);
+  return (data?.[0] as Documento) ?? null;
+}
+
+export async function gravarTrechosDoDocumento(usuarioId: string, documentoId: string, trechos: { conteudo: string; vetor: number[] }[]) {
+  const { error: e1 } = await db().from("trechos").delete().eq("usuario_id", usuarioId).eq("documento_id", documentoId);
+  falhou("limpar trechos do documento", e1);
+  for (let i = 0; i < trechos.length; i += 100) {
+    const lote = trechos.slice(i, i + 100).map((t, n) => ({
+      usuario_id: usuarioId,
+      documento_id: documentoId,
+      posicao: i + n,
+      conteudo: t.conteudo.slice(0, 4000),
+      vetor: JSON.stringify(t.vetor),
+    }));
+    const { error } = await db().from("trechos").insert(lote);
+    falhou("gravar trechos", error);
+  }
+}
+
+export async function concluirDocumento(usuarioId: string, id: string, resumo: string) {
+  const agora = new Date().toISOString();
+  const { error } = await db()
+    .from("documentos")
+    .update({ status: "pronto", status_em: agora, processado_em: agora, resumo: resumo.slice(0, 600) || null, erro: null })
+    .eq("usuario_id", usuarioId)
+    .eq("id", id);
+  falhou("concluir documento", error);
+}
+
+/** Erro na leitura: volta para a fila, ou desiste depois de algumas tentativas (ou se não tem jeito). */
+export async function falharDocumento(usuarioId: string, id: string, erro: string, definitivo: boolean) {
+  const { error } = await db()
+    .from("documentos")
+    .update({ status: definitivo ? "erro" : "pendente", status_em: new Date().toISOString(), erro: erro.slice(0, 300) })
+    .eq("usuario_id", usuarioId)
+    .eq("id", id);
+  falhou("falha no documento", error);
+}
+
+// ------------------------------------------------------- busca pelo sentido
+
+export type TrechoAchado = { documento_id: string | null; memoria_id: string | null; conteudo: string; distancia: number };
+
+export async function buscarTrechos(usuarioId: string, vetor: number[], limite = 8): Promise<TrechoAchado[]> {
+  const { data, error } = await db().rpc("buscar_trechos", { p_usuario: usuarioId, p_vetor: JSON.stringify(vetor), p_limite: limite });
+  falhou("buscar trechos", error);
+  return (data ?? []) as TrechoAchado[];
+}
+
+export async function datasDasAnotacoes(usuarioId: string, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const { data, error } = await db().from("memorias").select("id, criado_em").eq("usuario_id", usuarioId).in("id", ids);
+  falhou("datas das anotações", error);
+  return new Map(((data ?? []) as { id: string; criado_em: string }[]).map((a) => [a.id, a.criado_em]));
+}
