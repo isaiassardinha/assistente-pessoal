@@ -6,6 +6,20 @@ import * as banco from "./banco";
 import { cifrar, decifrar } from "./cofre";
 import { config } from "./config";
 import { AcessoNegado, aplicarRegras, buscarNovos, emSilencio, testarGmail, type EmailBruto, type EstadoCaixa } from "./email";
+import {
+  apagarEvento,
+  buscarEvento,
+  criarEvento,
+  esquecerToken,
+  GoogleRecusou,
+  listarEventos,
+  mudarEvento,
+  nomeDaAgenda,
+  SemPermissaoMarcada,
+  tokenDeAcesso,
+  trocarCodigo,
+  type NovoEvento,
+} from "./googleAgenda";
 import { classificarEmails } from "./ia";
 import { log } from "./log";
 import { numeroPermitido } from "./regras";
@@ -54,6 +68,29 @@ export async function conectarAgenda(usuarioId: string, url: string) {
     throw new ConexaoInvalida("Não consegui ler a agenda por esse link. Confira se copiou o \"endereço secreto no formato iCal\" inteiro.");
   }
   await banco.salvarConexao(usuarioId, "agenda_ics", "Google Agenda", cifrar(url));
+  cacheAgenda.delete(usuarioId);
+}
+
+/** Grava o login do Google (agenda: ler e criar). O código vem do site, logo depois da autorização. */
+export async function conectarGoogleAgenda(usuarioId: string, codigo: string, redirectUri: string) {
+  let refreshToken: string;
+  let conta: string;
+  try {
+    refreshToken = await trocarCodigo(codigo, redirectUri);
+    const token = await tokenDeAcesso(`teste:${usuarioId}`, refreshToken);
+    await listarEventos(token, new Date(), new Date(Date.now() + 86_400_000));
+    conta = await nomeDaAgenda(token);
+  } catch (e) {
+    log.aviso("teste do Google Agenda:", e);
+    if (e instanceof SemPermissaoMarcada) {
+      throw new ConexaoInvalida("Na tela do Google, a caixinha da agenda ficou desmarcada. Conecte de novo e marque a permissão.");
+    }
+    throw new ConexaoInvalida("O Google não liberou o acesso à agenda. Tente conectar de novo.");
+  } finally {
+    esquecerToken(`teste:${usuarioId}`);
+  }
+  await banco.salvarConexao(usuarioId, "google_calendar", conta, cifrar(refreshToken));
+  esquecerToken(usuarioId);
   cacheAgenda.delete(usuarioId);
 }
 
@@ -202,8 +239,12 @@ async function compromissosDaConexao(c: banco.Conexao, forcar = false): Promise<
   const guardado = cacheAgenda.get(c.usuario_id);
   if (guardado && !forcar && Date.now() - guardado.em < VALIDADE_CACHE) return guardado.compromissos;
   try {
-    const ics = await baixarIcs(decifrar(c.segredo_cifrado));
-    const compromissos = compromissosDoIcs(ics, new Date(Date.now() - 86_400_000), new Date(Date.now() + 15 * 86_400_000));
+    const de = new Date(Date.now() - 86_400_000);
+    const ate = new Date(Date.now() + 15 * 86_400_000);
+    const compromissos =
+      c.tipo === "google_calendar"
+        ? await listarEventos(await tokenDeAcesso(c.usuario_id, decifrar(c.segredo_cifrado)), de, ate)
+        : compromissosDoIcs(await baixarIcs(decifrar(c.segredo_cifrado)), de, ate);
     cacheAgenda.set(c.usuario_id, { em: Date.now(), compromissos });
     if (c.situacao !== "ok" || !c.ultima_leitura || Date.now() - new Date(c.ultima_leitura).getTime() > 30 * 60_000) {
       await banco.atualizarConexao(c.usuario_id, c.id, { situacao: "ok", erro: null, ultima_leitura: new Date().toISOString() });
@@ -211,16 +252,28 @@ async function compromissosDaConexao(c: banco.Conexao, forcar = false): Promise<
     return compromissos;
   } catch (e) {
     log.aviso("agenda:", e);
-    if (!guardado) {
+    if (e instanceof GoogleRecusou) {
+      await banco.atualizarConexao(c.usuario_id, c.id, { situacao: "erro", erro: "O Google cortou o acesso à agenda. Conecte de novo em Minha conta → Conexões." });
+      if (!c.erro_avisado && (await avisar(c.usuario_id, "⚠️ Perdi o acesso à sua agenda do Google. Conecte de novo em Minha conta → Conexões.").catch(() => false))) {
+        await banco.atualizarConexao(c.usuario_id, c.id, { erro_avisado: true });
+      }
+    } else if (!guardado) {
       await banco.atualizarConexao(c.usuario_id, c.id, { situacao: "erro", erro: "Não consegui ler a agenda. Se você trocou o link secreto, conecte de novo." });
     }
     return guardado?.compromissos ?? [];
   }
 }
 
+/** A agenda da pessoa: login do Google (ler e criar) tem preferência sobre o link iCal (só ler). */
+async function conexaoDaAgenda(usuarioId: string): Promise<banco.Conexao | null> {
+  const google = await banco.conexaoDe(usuarioId, "google_calendar");
+  if (google && !(google.situacao === "erro" && google.erro_avisado)) return google;
+  return (await banco.conexaoDe(usuarioId, "agenda_ics")) ?? google;
+}
+
 /** Compromissos de uma pessoa entre dois dias (AAAA-MM-DD, horário de Brasília). null = agenda não conectada. */
 export async function compromissosDe(usuarioId: string, de: string, ate: string): Promise<Compromisso[] | null> {
-  const c = await banco.conexaoDe(usuarioId, "agenda_ics");
+  const c = await conexaoDaAgenda(usuarioId);
   if (!c) return null;
   const todos = await compromissosDaConexao(c);
   return todos.filter((x) => x.dia >= de && x.dia <= ate);
@@ -228,7 +281,11 @@ export async function compromissosDe(usuarioId: string, de: string, ate: string)
 
 /** A cada minuto: avisa os compromissos que começam daqui a pouco. */
 export async function avisarCompromissos() {
-  for (const c of await banco.conexoesAtivas("agenda_ics")) {
+  const google = (await banco.conexoesAtivas("google_calendar")).filter((c) => !(c.situacao === "erro" && c.erro_avisado));
+  const comGoogle = new Set(google.map((c) => c.usuario_id));
+  const ics = (await banco.conexoesAtivas("agenda_ics")).filter((c) => !comGoogle.has(c.usuario_id));
+  for (const c of [...google, ...ics]) {
+    if (c.situacao === "erro" && c.erro_avisado) continue;
     try {
       const p = await banco.preferencias(c.usuario_id);
       if (!p || p.agenda_aviso_minutos <= 0) continue;
@@ -298,4 +355,38 @@ export async function enviarResumosDaManha() {
       log.erro("resumo da manhã:", e);
     }
   }
+}
+
+// ================================================================ criar / mudar / cancelar
+
+export class SemPermissaoNaAgenda extends Error {}
+
+async function tokenParaEscrever(usuarioId: string): Promise<string> {
+  const c = await banco.conexaoDe(usuarioId, "google_calendar");
+  if (!c || c.situacao === "erro") throw new SemPermissaoNaAgenda();
+  return tokenDeAcesso(usuarioId, decifrar(c.segredo_cifrado));
+}
+
+export async function criarCompromisso(usuarioId: string, e: NovoEvento): Promise<Compromisso> {
+  const criado = await criarEvento(await tokenParaEscrever(usuarioId), e);
+  cacheAgenda.delete(usuarioId);
+  return criado;
+}
+
+export async function compromissoPorId(usuarioId: string, id: string): Promise<Compromisso | null> {
+  return buscarEvento(await tokenParaEscrever(usuarioId), id);
+}
+
+export async function mudarCompromisso(usuarioId: string, id: string, e: NovoEvento): Promise<Compromisso | null> {
+  const r = await mudarEvento(await tokenParaEscrever(usuarioId), id, e);
+  cacheAgenda.delete(usuarioId);
+  return r;
+}
+
+export async function cancelarCompromissos(usuarioId: string, ids: string[]): Promise<number> {
+  const token = await tokenParaEscrever(usuarioId);
+  let n = 0;
+  for (const id of ids) if (await apagarEvento(token, id)) n++;
+  cacheAgenda.delete(usuarioId);
+  return n;
 }

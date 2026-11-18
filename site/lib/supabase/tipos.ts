@@ -163,7 +163,7 @@ export type Conta = {
 export type Conexao = {
   id: string;
   usuario_id: string;
-  tipo: "gmail" | "agenda_ics";
+  tipo: "gmail" | "agenda_ics" | "google_calendar";
   conta: string;
   segredo_cifrado: string;
   estado: Record<string, unknown>;

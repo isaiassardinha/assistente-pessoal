@@ -11,8 +11,16 @@ import { dataValida, intervaloDoPeriodo, instanteParaLocal, localParaInstante, s
 import { formatarReais } from "@/lib/dinheiro";
 import * as banco from "./banco";
 import { buscar } from "./cerebro";
-import { descreverCompromisso } from "./agenda";
-import { compromissosDe } from "./pessoal";
+import { descreverCompromisso, type Compromisso } from "./agenda";
+import { GoogleRecusou, idDeEventoValido, type NovoEvento } from "./googleAgenda";
+import {
+  cancelarCompromissos,
+  compromissoPorId,
+  compromissosDe,
+  criarCompromisso,
+  mudarCompromisso,
+  SemPermissaoNaAgenda,
+} from "./pessoal";
 import type { Ferramenta } from "./ia";
 import { situacaoDaConta } from "@/lib/contas";
 import {
@@ -70,6 +78,40 @@ function numero(v: unknown): number | null {
 
 function ids(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && UUID.test(x)).slice(0, 100) : [];
+}
+
+const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function hora(v: unknown): string {
+  const t = texto(v, 5).replace(/^(\d):/, "0$1:");
+  return HORA.test(t) ? t : "";
+}
+
+function somarMinutos(hhmm: string, minutos: number): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = (((h * 60 + m + minutos) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Explica para a IA por que não deu para mexer na agenda. */
+function erroDaAgenda(e: unknown) {
+  if (e instanceof SemPermissaoNaAgenda) {
+    return {
+      resultado:
+        "NÃO EXECUTADO: para criar, mudar ou cancelar compromissos, a agenda precisa estar conectada pelo botão \"Conectar com Google\" " +
+        "no site, em Minha conta → Conexões (o link secreto só permite ler).",
+    };
+  }
+  if (e instanceof GoogleRecusou) return { resultado: "NÃO EXECUTADO: o Google recusou o acesso. Peça para conectar de novo em Minha conta → Conexões." };
+  throw e;
+}
+
+/** Compromissos do mesmo dia que batem no horário (para avisar choque). */
+function choques(lista: Compromisso[] | null, novo: Compromisso): string[] {
+  if (!lista || novo.diaInteiro) return [];
+  return lista
+    .filter((c) => !c.diaInteiro && c.id !== novo.id && c.inicio < novo.fim && c.fim > novo.inicio)
+    .map(descreverCompromisso);
 }
 
 const PERIODOS_CONSULTA = ["hoje", "ontem", "semana", "mes", "mes-passado", "30dias", "ano", "tudo", "datas"] as const;
@@ -430,6 +472,14 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
         else if (acao.tipo === "apagar_anotacoes") feitos = await banco.apagarAnotacoes(uid, acao.dados.ids);
         else if (acao.tipo === "apagar_documentos") feitos = await banco.apagarDocumentos(uid, acao.dados.ids);
         else if (acao.tipo === "cancelar_contas") feitos = await banco.cancelarContas(uid, acao.dados.ids);
+        else if (acao.tipo === "cancelar_compromissos") {
+          try {
+            feitos = await cancelarCompromissos(uid, acao.dados.ids.filter(idDeEventoValido));
+          } catch (e) {
+            await banco.apagarAcaoPendente(uid);
+            return erroDaAgenda(e);
+          }
+        }
         await banco.apagarAcaoPendente(uid);
         return {
           resultado: "EXECUTADO",
@@ -1231,8 +1281,8 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
     {
       nome: "ver_agenda",
       descricao:
-        "Mostra os compromissos da agenda pessoal (Google Agenda) entre duas datas AAAA-MM-DD (até 15 dias à frente). " +
-        "Ex.: 'o que tenho amanhã?', 'estou livre sexta à tarde?'. Só leitura: ainda não cria compromissos.",
+        "Mostra os compromissos da agenda pessoal (Google Agenda) entre duas datas AAAA-MM-DD (até 15 dias à frente), com o id de cada um. " +
+        "Ex.: 'o que tenho amanhã?', 'estou livre sexta à tarde?'. Use também antes de mudar ou cancelar, para achar o id.",
       parametros: {
         type: "object",
         properties: { de: { type: "string", description: "AAAA-MM-DD" }, ate: { type: "string", description: "AAAA-MM-DD (padrão: igual a de)" } },
@@ -1246,8 +1296,132 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
         if (lista === null) return { resultado: "AGENDA NÃO CONECTADA: explique que dá para conectar no site, em Minha conta → Conexões." };
         return {
           quantidade: lista.length,
-          compromissos: lista.map((c) => ({ dia: dataCurta(c.dia, ctx.hoje), quando: descreverCompromisso(c) })),
+          compromissos: lista.map((c) => ({ id: c.id, dia: dataCurta(c.dia, ctx.hoje), quando: descreverCompromisso(c) })),
         };
+      },
+    },
+    {
+      nome: "criar_compromisso",
+      descricao:
+        "Marca um compromisso na agenda do Google. Precisa do dia e do horário DITOS pela pessoa (ou dia_inteiro=true se ela disse o dia todo). " +
+        "Sem horário de término, fica com 1 hora: avise isso na resposta.",
+      parametros: {
+        type: "object",
+        properties: {
+          titulo: { type: "string" },
+          data: { type: "string", description: "AAAA-MM-DD" },
+          inicio: { type: "string", description: "HH:MM (horário de Brasília)" },
+          fim: { type: "string", description: "HH:MM, só se a pessoa disse" },
+          dia_inteiro: { type: "boolean" },
+          local: { type: "string" },
+        },
+        required: ["titulo", "data"],
+      },
+      executar: async (a) => {
+        const titulo = texto(a.titulo, 200);
+        const data = texto(a.data, 10);
+        const diaInteiro = a.dia_inteiro === true;
+        const inicio = hora(a.inicio);
+        const fim = hora(a.fim);
+        if (!titulo) return { resultado: "NÃO GRAVADO: falta o nome do compromisso" };
+        if (!dataValida(data) || data < ctx.hoje || data > somarDias(ctx.hoje, 730)) return { resultado: "NÃO GRAVADO: data inválida ou no passado" };
+        if (!dataFoiDita(data, ctx.textosDaPessoa, ctx.hoje)) return { resultado: "NÃO GRAVADO: a pessoa não disse o dia. Pergunte." };
+        if (!diaInteiro) {
+          if (!inicio || !horaFoiDita(ctx.textosDaPessoa)) return { resultado: "NÃO GRAVADO: a pessoa não disse o horário. Pergunte (ou se é o dia todo)." };
+          if (data === ctx.hoje && inicio < instanteParaLocal(new Date().toISOString()).slice(11, 16)) {
+            return { resultado: "NÃO GRAVADO: esse horário de hoje já passou. Confirme o dia com a pessoa." };
+          }
+        }
+        const novo: NovoEvento = { titulo, data, diaInteiro, inicio: diaInteiro ? undefined : inicio, fim: diaInteiro ? undefined : fim || undefined, local: texto(a.local, 200) };
+        try {
+          const criado = await criarCompromisso(uid, novo);
+          const batem = choques(await compromissosDe(uid, data, data), criado);
+          return {
+            resultado: "GRAVADO NA AGENDA",
+            compromisso: `${dataCurta(criado.dia, ctx.hoje)} ${descreverCompromisso(criado)}`,
+            ...(!diaInteiro && !fim ? { observacao: "Ficou com 1 hora de duração (padrão). Diga isso à pessoa." } : {}),
+            ...(batem.length ? { atencao_choque_de_horario: batem } : {}),
+          };
+        } catch (e) {
+          return erroDaAgenda(e);
+        }
+      },
+    },
+    {
+      nome: "mudar_compromisso",
+      descricao:
+        "Muda um compromisso da agenda do Google (dia, horário, nome ou local). Precisa do id (use ver_agenda antes). " +
+        "Mande só o que muda. Se mudar só o início, a duração continua a mesma.",
+      parametros: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          data: { type: "string", description: "novo dia AAAA-MM-DD" },
+          inicio: { type: "string", description: "novo início HH:MM" },
+          fim: { type: "string", description: "novo término HH:MM" },
+          titulo: { type: "string" },
+          local: { type: "string" },
+        },
+        required: ["id"],
+      },
+      executar: async (a) => {
+        if (!idDeEventoValido(a.id)) return { resultado: "NÃO EXECUTADO: compromisso não identificado. Use ver_agenda para achar o id." };
+        const data = texto(a.data, 10);
+        const inicio = hora(a.inicio);
+        const fim = hora(a.fim);
+        if (data && (!dataValida(data) || data < ctx.hoje)) return { resultado: "NÃO EXECUTADO: data inválida ou no passado" };
+        if (data && !dataFoiDita(data, ctx.textosDaPessoa, ctx.hoje)) return { resultado: "NÃO EXECUTADO: a pessoa não disse o novo dia. Pergunte." };
+        if ((inicio || fim) && !horaFoiDita(ctx.textosDaPessoa)) return { resultado: "NÃO EXECUTADO: a pessoa não disse o novo horário. Pergunte." };
+        try {
+          const atual = await compromissoPorId(uid, a.id);
+          if (!atual) return { resultado: "NÃO EXECUTADO: compromisso não encontrado (pode ter sido apagado)" };
+          const duracao = Math.max(15, Math.round((atual.fim.getTime() - atual.inicio.getTime()) / 60_000));
+          const novoInicio = inicio || (atual.diaInteiro ? "" : instanteParaLocal(atual.inicio.toISOString()).slice(11, 16));
+          const novo: NovoEvento = {
+            titulo: texto(a.titulo, 200) || atual.titulo,
+            data: data || atual.dia,
+            local: typeof a.local === "string" ? texto(a.local, 200) : atual.local,
+            diaInteiro: !novoInicio,
+            inicio: novoInicio || undefined,
+            fim: novoInicio ? fim || somarMinutos(novoInicio, atual.diaInteiro ? 60 : Math.min(duracao, 1439)) : undefined,
+          };
+          const mudado = await mudarCompromisso(uid, a.id, novo);
+          if (!mudado) return { resultado: "NÃO EXECUTADO: compromisso não encontrado (pode ter sido apagado)" };
+          const batem = choques(await compromissosDe(uid, mudado.dia, mudado.dia), mudado);
+          return {
+            resultado: "ALTERADO NA AGENDA",
+            antes: `${dataCurta(atual.dia, ctx.hoje)} ${descreverCompromisso(atual)}`,
+            agora: `${dataCurta(mudado.dia, ctx.hoje)} ${descreverCompromisso(mudado)}`,
+            ...(batem.length ? { atencao_choque_de_horario: batem } : {}),
+          };
+        } catch (e) {
+          return erroDaAgenda(e);
+        }
+      },
+    },
+    {
+      nome: "cancelar_compromisso",
+      descricao: "Cancela (apaga) compromissos da agenda do Google. Precisa dos ids (use ver_agenda antes). Sempre pede confirmação.",
+      parametros: { type: "object", properties: { ids: { type: "array", items: { type: "string" } } }, required: ["ids"] },
+      executar: async (a) => {
+        const lista = (Array.isArray(a.ids) ? a.ids : []).filter(idDeEventoValido).slice(0, 20);
+        if (lista.length === 0) return { resultado: "NÃO EXECUTADO: compromisso não identificado. Use ver_agenda para achar o id." };
+        try {
+          const achados: { id: string; descricao: string }[] = [];
+          for (const id of lista) {
+            const c = await compromissoPorId(uid, id);
+            if (c) achados.push({ id, descricao: `${dataCurta(c.dia, ctx.hoje)} ${descreverCompromisso(c)}` });
+          }
+          if (achados.length === 0) return { resultado: "NÃO EXECUTADO: compromisso não encontrado (pode já ter sido apagado)" };
+          await banco.salvarAcaoPendente(uid, "cancelar_compromissos", { ids: achados.map((x) => x.id), descricao: achados.map((x) => x.descricao) });
+          return {
+            resultado: "AGUARDANDO CONFIRMAÇÃO (nada cancelado ainda)",
+            itens: achados.map((x) => x.descricao),
+            instrucao: 'Liste os compromissos e pergunte "Confirma o cancelamento?"',
+          };
+        } catch (e) {
+          return erroDaAgenda(e);
+        }
       },
     },
     {

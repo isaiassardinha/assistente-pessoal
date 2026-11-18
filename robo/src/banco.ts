@@ -1005,7 +1005,7 @@ export async function registrarUsoIa(u: {
 
 // ============================================================ E-MAIL E AGENDA
 
-export type TipoConexao = "gmail" | "agenda_ics";
+export type TipoConexao = "gmail" | "agenda_ics" | "google_calendar";
 export type Conexao = {
   id: string;
   usuario_id: string;

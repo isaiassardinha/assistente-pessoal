@@ -12,7 +12,8 @@ import { buscar } from "./cerebro";
 import { IaIndisponivel, responderComFontes } from "./ia";
 import { gerarCodigo, hashCodigo, LimitadorPorMinuto, numeroPermitido } from "./regras";
 import { emailValido, senhaDeAppValida } from "./email";
-import { compromissosDe, conectarAgenda, conectarGmail, ConexaoInvalida } from "./pessoal";
+import { redirectUriValido } from "./googleAgenda";
+import { compromissosDe, conectarAgenda, conectarGmail, conectarGoogleAgenda, ConexaoInvalida } from "./pessoal";
 import { acordarCerebro } from "./rotinas";
 import { comUso } from "./uso";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
@@ -147,7 +148,7 @@ export function iniciarApiInterna() {
         if (!UUID.test(usuarioId) || pergunta.length < 2) return json(res, 400, { ok: false, erro: "Escreva a pergunta." });
         return json(res, 200, await comUso(usuarioId, () => perguntar(usuarioId, pergunta)));
       }
-      if (rota === "POST /conexoes/gmail" || rota === "POST /conexoes/agenda") {
+      if (rota === "POST /conexoes/gmail" || rota === "POST /conexoes/agenda" || rota === "POST /conexoes/google") {
         const corpo = await lerCorpo(req);
         const usuarioId = String(corpo.usuarioId ?? "");
         if (!UUID.test(usuarioId)) return json(res, 400, { ok: false, erro: "pedido inválido" });
@@ -161,6 +162,12 @@ export function iniciarApiInterna() {
             if (!emailValido(email)) return json(res, 400, { ok: false, erro: "Digite o seu endereço do Gmail completo." });
             if (!senhaDeAppValida(senha)) return json(res, 400, { ok: false, erro: "A senha de app tem 16 letras (o Google mostra em 4 blocos). Não é a senha normal da conta." });
             await conectarGmail(usuarioId, email, senha);
+          } else if (rota === "POST /conexoes/google") {
+            const codigo = String(corpo.codigo ?? "");
+            const redirectUri = String(corpo.redirectUri ?? "");
+            if (!config.googleClientId || !config.googleClientSecret) return json(res, 503, { ok: false, erro: "O login do Google ainda não foi configurado no servidor." });
+            if (codigo.length < 10 || codigo.length > 2000 || !redirectUriValido(redirectUri)) return json(res, 400, { ok: false, erro: "pedido inválido" });
+            await conectarGoogleAgenda(usuarioId, codigo, redirectUri);
           } else {
             await conectarAgenda(usuarioId, String(corpo.url ?? "").trim());
           }

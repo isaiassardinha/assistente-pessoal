@@ -33,7 +33,7 @@ export async function conectarAgenda(_a: EstadoFormulario, f: FormData): Promise
 export async function desconectar(f: FormData) {
   const { supabase } = await exigirAprovado();
   const tipo = campo(f, "tipo");
-  if (tipo !== "gmail" && tipo !== "agenda_ics") return;
+  if (tipo !== "gmail" && tipo !== "agenda_ics" && tipo !== "google_calendar") return;
   await supabase.from("conexoes").delete().eq("tipo", tipo);
   atualizar();
 }

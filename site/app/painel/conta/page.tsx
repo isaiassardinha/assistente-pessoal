@@ -11,12 +11,16 @@ import { salvarDados } from "./acoes";
 import { conectarAgenda, conectarGmail, desconectar, salvarAvisosPessoais } from "./conexoes";
 import { BotaoEnviar } from "@/components/BotaoEnviar";
 import { formatarDataHora } from "@/lib/datas";
+import { googleConfigurado, RESULTADOS_GOOGLE, type ResultadoGoogle } from "@/lib/google";
 import { Verificacao } from "./Verificacao";
 
 export const metadata: Metadata = { title: "Minha conta" };
 
-export default async function MinhaConta() {
+export default async function MinhaConta({ searchParams }: PageProps<"/painel/conta">) {
   const { supabase, perfil, usuarioId } = await exigirAprovado();
+  const { google: retornoGoogle } = await searchParams;
+  const resultadoGoogle = typeof retornoGoogle === "string" && retornoGoogle in RESULTADOS_GOOGLE ? RESULTADOS_GOOGLE[retornoGoogle as ResultadoGoogle] : null;
+  const comGoogle = googleConfigurado();
   const hoje = hojeISO();
   const { inicio, fim } = limitesDoMes(hoje.slice(0, 7));
   const [{ data: uso }, cotacao, { data: conexoes }] = await Promise.all([
@@ -26,6 +30,7 @@ export default async function MinhaConta() {
   ]);
   const gmail = (conexoes ?? []).find((c) => c.tipo === "gmail");
   const agenda = (conexoes ?? []).find((c) => c.tipo === "agenda_ics");
+  const agendaGoogle = (conexoes ?? []).find((c) => c.tipo === "google_calendar");
   const opcoes = (de: number, ate: number, rotulo: (n: number) => string) =>
     Array.from({ length: ate - de + 1 }, (_, i) => ({ valor: String(de + i), rotulo: rotulo(de + i) }));
   const meuUso = resumirUso(((uso ?? []) as LinhaUso[]).filter((l) => l.usuario_id === usuarioId), hoje, hoje.slice(0, 7));
@@ -56,7 +61,7 @@ export default async function MinhaConta() {
 
       <Secao
         titulo="Conexões"
-        descricao="Ligue seu e-mail e sua agenda pessoais. O acesso é só de leitura: o assistente nunca apaga, move ou responde nada. As senhas ficam criptografadas."
+        descricao="Ligue seu e-mail e sua agenda pessoais. O e-mail é só de leitura: o assistente nunca apaga, move ou responde nada. Na agenda conectada pelo Google, ele também marca, muda e cancela compromissos quando você pede no WhatsApp. As senhas ficam criptografadas."
       >
         <div className="space-y-6">
           <div id="gmail" className="space-y-3">
@@ -108,23 +113,77 @@ export default async function MinhaConta() {
 
           <div id="agenda" className="space-y-3 border-t border-zinc-200 pt-5">
             <h3 className="font-semibold text-zinc-900">📅 Agenda (Google Agenda)</h3>
+            {resultadoGoogle ? <Aviso tipo={resultadoGoogle.tipo}>{resultadoGoogle.texto}</Aviso> : null}
+
+            {agendaGoogle ? (
+              <div className="space-y-2">
+                <p className="text-sm text-zinc-700">
+                  Conectada pelo Google{agendaGoogle.conta ? ` (${agendaGoogle.conta})` : ""}: ler, marcar, mudar e cancelar compromissos
+                  {agendaGoogle.ultima_leitura ? ` · última leitura ${formatarDataHora(agendaGoogle.ultima_leitura)}` : ""}
+                </p>
+                {agendaGoogle.situacao === "erro" ? (
+                  <Aviso tipo="erro">{agendaGoogle.erro ?? "Deu um problema na conexão."} Clique em Conectar com Google de novo.</Aviso>
+                ) : null}
+                <form action={desconectar}>
+                  <input type="hidden" name="tipo" value="google_calendar" />
+                  <BotaoEnviar variante="secundario" enviando="…">
+                    Desconectar agenda do Google
+                  </BotaoEnviar>
+                </form>
+                <p className="text-xs text-zinc-500">
+                  Para cortar o acesso também do lado do Google, abra{" "}
+                  <a className="underline" href="https://myaccount.google.com/connections" target="_blank" rel="noopener">
+                    Conta do Google → Apps conectados
+                  </a>
+                  .
+                </p>
+              </div>
+            ) : null}
+
+            {comGoogle && (!agendaGoogle || agendaGoogle.situacao === "erro") ? (
+              <div className="space-y-2">
+                {!agendaGoogle ? (
+                  <p className="text-sm text-zinc-700">
+                    Recomendado: com o login do Google, além de ler a agenda, o assistente marca, muda e cancela compromissos pelo WhatsApp.
+                  </p>
+                ) : null}
+                <a
+                  href="/auth/google/iniciar"
+                  className="inline-flex items-center rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+                >
+                  Conectar com Google
+                </a>
+                <p className="text-xs text-zinc-500">
+                  O Google vai mostrar &quot;O Google não verificou este app&quot;. É normal: o app é seu. Clique em <strong>Avançado</strong> →{" "}
+                  <strong>Acessar</strong> e depois marque a permissão da agenda.
+                </p>
+              </div>
+            ) : null}
+
             {agenda ? (
               <div className="space-y-2">
                 <p className="text-sm text-zinc-700">
-                  Conectada{agenda.ultima_leitura ? ` · última leitura ${formatarDataHora(agenda.ultima_leitura)}` : ""}
+                  Link secreto (só leitura) conectado{agenda.ultima_leitura ? ` · última leitura ${formatarDataHora(agenda.ultima_leitura)}` : ""}
+                  {agendaGoogle && agendaGoogle.situacao !== "erro" ? ". Não é mais necessário: o login do Google já faz tudo." : ""}
                 </p>
-                {agenda.situacao === "erro" ? <Aviso tipo="erro">{agenda.erro ?? "Deu um problema na conexão."} Conecte de novo abaixo.</Aviso> : null}
+                {agenda.situacao === "erro" && !agendaGoogle ? (
+                  <Aviso tipo="erro">{agenda.erro ?? "Deu um problema na conexão."} Conecte de novo abaixo.</Aviso>
+                ) : null}
                 <form action={desconectar}>
                   <input type="hidden" name="tipo" value="agenda_ics" />
                   <BotaoEnviar variante="secundario" enviando="…">
-                    Desconectar agenda
+                    Desconectar link secreto
                   </BotaoEnviar>
                 </form>
               </div>
             ) : null}
-            {!agenda || agenda.situacao === "erro" ? (
-              <>
-                <ol className="list-decimal space-y-1 pl-5 text-sm text-zinc-700">
+
+            {!agendaGoogle && (!agenda || agenda.situacao === "erro") ? (
+              <details className="space-y-2 text-sm" open={!comGoogle}>
+                <summary className="cursor-pointer text-zinc-700">
+                  {comGoogle ? "Outra forma (só leitura): pelo link secreto" : "Conectar pelo link secreto (só leitura)"}
+                </summary>
+                <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-zinc-700">
                   <li>
                     Abra as{" "}
                     <a className="text-emerald-700 underline" href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener">
@@ -141,7 +200,7 @@ export default async function MinhaConta() {
                 <FormularioAcao acao={conectarAgenda} rotulo="Conectar agenda" enviando="Testando a agenda…">
                   <Campo rotulo="Endereço secreto no formato iCal" name="url" type="password" required autoComplete="off" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
                 </FormularioAcao>
-              </>
+              </details>
             ) : null}
           </div>
 

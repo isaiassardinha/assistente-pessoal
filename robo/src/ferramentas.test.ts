@@ -11,7 +11,51 @@ const apagadas: string[][] = [];
 const anotacoes: string[] = [];
 const documentosApagados: string[][] = [];
 const regras: { tipo: string; padrao: string }[] = [];
-vi.mock("./pessoal", () => ({ compromissosDe: async () => null }));
+const agenda = {
+  conectada: false,
+  criados: [] as unknown[],
+  mudados: [] as unknown[],
+  cancelados: [] as string[][],
+};
+const EVENTO = {
+  chave: "evt12345|x",
+  id: "evt12345",
+  titulo: "Dentista",
+  inicio: new Date("2026-11-20T17:00:00Z"),
+  fim: new Date("2026-11-20T18:00:00Z"),
+  diaInteiro: false,
+  dia: "2026-11-20",
+  local: "",
+};
+vi.mock("./pessoal", () => {
+  class SemPermissaoNaAgenda extends Error {}
+  const exigir = () => {
+    if (!agenda.conectada) throw new SemPermissaoNaAgenda();
+  };
+  return {
+    SemPermissaoNaAgenda,
+    compromissosDe: async () => (agenda.conectada ? [EVENTO] : null),
+    criarCompromisso: async (_u: string, e: { titulo: string; data: string; inicio?: string }) => {
+      exigir();
+      agenda.criados.push(e);
+      return { ...EVENTO, id: "novo12345", titulo: e.titulo, dia: e.data };
+    },
+    compromissoPorId: async (_u: string, id: string) => {
+      exigir();
+      return id === EVENTO.id ? EVENTO : null;
+    },
+    mudarCompromisso: async (_u: string, id: string, e: { titulo: string; data: string }) => {
+      exigir();
+      agenda.mudados.push({ id, ...e });
+      return { ...EVENTO, titulo: e.titulo, dia: e.data };
+    },
+    cancelarCompromissos: async (_u: string, ids: string[]) => {
+      exigir();
+      agenda.cancelados.push(ids);
+      return ids.length;
+    },
+  };
+});
 const contas = {
   criadas: [] as {
     descricao: string;
@@ -149,6 +193,10 @@ function ferramenta(nome: string, textos: string[]) {
 }
 
 beforeEach(() => {
+  agenda.conectada = false;
+  agenda.criados.length = 0;
+  agenda.mudados.length = 0;
+  agenda.cancelados.length = 0;
   gravadas.length = 0;
   apagadas.length = 0;
   pendente.atual = null;
@@ -445,5 +493,70 @@ describe("e-mail e agenda", () => {
   it("agenda não conectada: orienta a conectar", async () => {
     const r = (await ferramenta("ver_agenda", ["o que tenho amanhã?"]).executar({ de: "2026-11-18" })) as { resultado: string };
     expect(r.resultado).toMatch(/AGENDA NÃO CONECTADA/);
+  });
+});
+
+describe("compromissos na agenda", () => {
+  it("marca com dia e hora ditos; sem término avisa 1 hora", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("criar_compromisso", ["marca dentista dia 20 às 15h"]).executar({ titulo: "Dentista", data: "2026-11-20", inicio: "15:00" })) as Record<string, unknown>;
+    expect(r.resultado).toBe("GRAVADO NA AGENDA");
+    expect(r.observacao).toMatch(/1 hora/);
+    expect(agenda.criados).toEqual([{ titulo: "Dentista", data: "2026-11-20", diaInteiro: false, inicio: "15:00", fim: undefined, local: "" }]);
+  });
+  it("avisa choque de horário", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("criar_compromisso", ["marca reunião dia 20 às 14h30"]).executar({ titulo: "Reunião", data: "2026-11-20", inicio: "14:30" })) as Record<string, unknown>;
+    expect(r.atencao_choque_de_horario).toEqual(["14:00–15:00 Dentista"]);
+  });
+  it("NÃO marca sem horário dito", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("criar_compromisso", ["marca dentista dia 20"]).executar({ titulo: "Dentista", data: "2026-11-20", inicio: "09:00" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO GRAVADO/);
+    expect(agenda.criados).toHaveLength(0);
+  });
+  it("NÃO marca em dia que a pessoa não disse", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("criar_compromisso", ["marca dentista às 15h"]).executar({ titulo: "Dentista", data: "2026-11-25", inicio: "15:00" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO GRAVADO/);
+    expect(agenda.criados).toHaveLength(0);
+  });
+  it("dia inteiro não precisa de horário", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("criar_compromisso", ["coloca na agenda viagem dia 20 o dia todo"]).executar({ titulo: "Viagem", data: "2026-11-20", dia_inteiro: true })) as { resultado: string };
+    expect(r.resultado).toBe("GRAVADO NA AGENDA");
+  });
+  it("sem o login do Google: explica como conectar", async () => {
+    const r = (await ferramenta("criar_compromisso", ["marca dentista dia 20 às 15h"]).executar({ titulo: "Dentista", data: "2026-11-20", inicio: "15:00" })) as { resultado: string };
+    expect(r.resultado).toMatch(/Conectar com Google/);
+  });
+  it("mudar só o horário mantém a duração e o nome", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("mudar_compromisso", ["passa o dentista para as 16h"]).executar({ id: "evt12345", inicio: "16:00" })) as { resultado: string };
+    expect(r.resultado).toBe("ALTERADO NA AGENDA");
+    expect(agenda.mudados).toEqual([{ id: "evt12345", titulo: "Dentista", data: "2026-11-20", local: "", diaInteiro: false, inicio: "16:00", fim: "17:00" }]);
+  });
+  it("NÃO muda para dia que a pessoa não disse", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("mudar_compromisso", ["muda o dentista"]).executar({ id: "evt12345", data: "2026-11-27" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO EXECUTADO/);
+    expect(agenda.mudados).toHaveLength(0);
+  });
+  it("NÃO aceita id estranho", async () => {
+    agenda.conectada = true;
+    const r = (await ferramenta("mudar_compromisso", ["muda para as 16h"]).executar({ id: "../calendars", inicio: "16:00" })) as { resultado: string };
+    expect(r.resultado).toMatch(/^NÃO EXECUTADO/);
+  });
+  it("cancelar pede confirmação e só cancela com sim", async () => {
+    agenda.conectada = true;
+    const r1 = (await ferramenta("cancelar_compromisso", ["cancela o dentista"]).executar({ ids: ["evt12345"] })) as { resultado: string; itens: string[] };
+    expect(r1.resultado).toMatch(/AGUARDANDO CONFIRMAÇÃO/);
+    expect(r1.itens).toEqual(["20/11 14:00–15:00 Dentista"]);
+    expect(agenda.cancelados).toHaveLength(0);
+    const r2 = (await ferramenta("confirmar_acao", ["cancela o dentista", "talvez"]).executar({})) as { resultado: string };
+    expect(r2.resultado).toMatch(/^NÃO EXECUTADO/);
+    const r3 = (await ferramenta("confirmar_acao", ["cancela o dentista", "sim"]).executar({})) as { resultado: string };
+    expect(r3.resultado).toBe("EXECUTADO");
+    expect(agenda.cancelados).toEqual([["evt12345"]]);
   });
 });

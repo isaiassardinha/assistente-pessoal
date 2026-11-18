@@ -86,7 +86,7 @@ export async function acordarCerebro(): Promise<void> {
 export type ResultadoConexao = { ok: boolean; erro?: string };
 
 /** O robô testa a conexão e, se der certo, guarda a senha criptografada. */
-export async function conectarNoRobo(caminho: "/conexoes/gmail" | "/conexoes/agenda", corpo: Record<string, string>): Promise<ResultadoConexao> {
+export async function conectarNoRobo(caminho: "/conexoes/gmail" | "/conexoes/agenda" | "/conexoes/google", corpo: Record<string, string>): Promise<ResultadoConexao> {
   try {
     const r = await chamar(caminho, "POST", corpo, 45_000);
     return (await r.json()) as ResultadoConexao;

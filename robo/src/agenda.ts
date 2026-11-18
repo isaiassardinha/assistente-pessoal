@@ -5,6 +5,7 @@ import { instanteParaLocal } from "@/lib/datas";
 
 export type Compromisso = {
   chave: string; // identificador do compromisso + início (para não avisar duas vezes)
+  id?: string; // id no Google (quando a agenda está ligada pelo login do Google)
   titulo: string;
   inicio: Date;
   fim: Date;

@@ -728,6 +728,8 @@ select testes.deve_bloquear(
      values ('00000000-0000-4000-a000-00000000a001', '00000000-0000-4000-b400-000000000001', '<x@x>', now(), 'normal')$q$,
   'e-mail da Ana não pode apontar para a conexão do Bruno');
 
+insert into public.conexoes (usuario_id, tipo, conta, segredo_cifrado) values
+  ('00000000-0000-4000-a000-00000000b001', 'google_calendar', 'bruno@gmail.com', 'v1:token-do-bruno');
 select testes.como('00000000-0000-4000-a000-00000000a001');
 select testes.deve_bloquear('select segredo_cifrado from public.conexoes', 'Ana não lê o segredo nem da própria conexão');
 select testes.deve_bloquear('select * from public.conexoes', 'select * esbarra no segredo (não vaza por engano)');
@@ -739,6 +741,9 @@ select testes.ok((select count(*) from public.regras_email) = 0, 'Ana não vê a
 select testes.deve_bloquear(
   $q$insert into public.conexoes (usuario_id, tipo, conta, segredo_cifrado) values ('00000000-0000-4000-a000-00000000a001', 'agenda_ics', 'x', 'y')$q$,
   'Ana não grava conexão direto (só pelo robô, que testa e criptografa)');
+select testes.deve_bloquear(
+  $q$insert into public.conexoes (usuario_id, tipo, conta, segredo_cifrado) values ('00000000-0000-4000-a000-00000000a001', 'google_calendar', 'x', 'y')$q$,
+  'Ana não grava a conexão do Google direto');
 select testes.deve_bloquear(
   $q$update public.conexoes set conta = 'outra' where usuario_id = '00000000-0000-4000-a000-00000000a001'$q$,
   'Ana não altera a conexão');

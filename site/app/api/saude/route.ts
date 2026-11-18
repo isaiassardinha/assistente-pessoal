@@ -1,3 +1,4 @@
+import { googleConfigurado } from "@/lib/google";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { connection } from "next/server";
@@ -25,7 +26,7 @@ export async function GET() {
   }
 
   return Response.json(
-    { ok: true, versao, robo, agora: new Date().toISOString() },
+    { ok: true, versao, robo, loginGoogle: googleConfigurado() ? "configurado" : "falta configurar", agora: new Date().toISOString() },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
