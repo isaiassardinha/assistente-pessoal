@@ -460,6 +460,9 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
           return {
             resultado: "NÃO EXECUTADO: não há nada esperando confirmação (pode ter expirado em 30 minutos)",
           };
+        if (acao.tipo.startsWith("espaco_")) {
+          return { resultado: "NÃO EXECUTADO: o que está esperando confirmação é no grupo; a pessoa precisa responder lá" };
+        }
         if (!respostaAfirmativa(ctx.ultimaMensagem)) {
           return {
             resultado: "NÃO EXECUTADO: a pessoa não confirmou claramente. Pergunte de novo se confirma.",

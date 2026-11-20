@@ -193,6 +193,45 @@ export type EmailResumo = {
 
 export type RegraEmail = { id: string; usuario_id: string; tipo: "importante" | "ignorar"; padrao: string; criado_em: string };
 
+export type Espaco = {
+  id: string;
+  nome: string;
+  grupo_jid: string | null;
+  grupo_nome: string | null;
+  drive_conta: string | null;
+  drive_situacao: "ok" | "erro" | null;
+  criado_em: string;
+};
+
+export type EspacoMembro = { espaco_id: string; usuario_id: string; papel: "admin" | "membro"; criado_em: string };
+
+export type EspacoDocumento = {
+  id: string;
+  espaco_id: string;
+  enviado_por: string | null;
+  enviado_por_nome: string;
+  nome_arquivo: string;
+  descricao: string;
+  tipo_mime: string | null;
+  tamanho_bytes: number;
+  armazenamento: "supabase" | "drive";
+  status: "pendente" | "processando" | "pronto" | "erro";
+  resumo: string | null;
+  erro: string | null;
+  criado_em: string;
+};
+
+export type EspacoMensagem = {
+  id: number;
+  espaco_id: string;
+  autor_id: string | null;
+  autor_nome: string;
+  do_robo: boolean;
+  tipo: "texto" | "audio";
+  texto: string;
+  criado_em: string;
+};
+
 export type Database = {
   __InternalSupabase: { PostgrestVersion: "14.18" };
   public: {
@@ -212,6 +251,10 @@ export type Database = {
       conexoes: Tabela<Conexao>;
       emails: Tabela<EmailResumo>;
       regras_email: Tabela<RegraEmail>;
+      espacos: Tabela<Espaco>;
+      espaco_membros: Tabela<EspacoMembro>;
+      espaco_documentos: Tabela<EspacoDocumento>;
+      espaco_mensagens: Tabela<EspacoMensagem>;
     };
     Views: { [_ in never]: never };
     Functions: {
@@ -244,6 +287,17 @@ export type Database = {
       reler_documento: {
         Args: { p_documento: string };
         Returns: boolean;
+      };
+      criar_espaco: { Args: { p_nome: string }; Returns: string };
+      gerar_codigo_espaco: { Args: { p_espaco: string }; Returns: string };
+      desligar_grupo_espaco: { Args: { p_espaco: string }; Returns: undefined };
+      desconectar_drive_espaco: { Args: { p_espaco: string }; Returns: undefined };
+      adicionar_membro_espaco: { Args: { p_espaco: string; p_email: string }; Returns: "ok" | "nao_encontrado" | "ja_membro" | "limite" };
+      remover_membro_espaco: { Args: { p_espaco: string; p_usuario: string }; Returns: boolean };
+      definir_papel_espaco: { Args: { p_espaco: string; p_usuario: string; p_papel: "admin" | "membro" }; Returns: boolean };
+      membros_do_espaco: {
+        Args: { p_espaco: string };
+        Returns: { usuario_id: string; nome: string; papel: "admin" | "membro"; whatsapp_ok: boolean; entrou_em: string }[];
       };
       reabrir_conta: {
         Args: { p_usuario: string; p_conta: string };

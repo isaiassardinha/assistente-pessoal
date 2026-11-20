@@ -22,7 +22,7 @@ import pino from "pino";
 import QRCode from "qrcode";
 import { config } from "./config";
 import { log } from "./log";
-import { numeroPermitido, variantesCelular } from "./regras";
+import { numeroPermitido, tirarMencoes, variantesCelular } from "./regras";
 
 export type Situacao = "desligado" | "conectando" | "aguardando_qr" | "conectado";
 
@@ -34,10 +34,19 @@ type Estado = {
   caiuEm: string | null; // quando a conexão caiu pela última vez
 };
 
+export type ChaveMensagem = { remoteJid: string; id: string; participant?: string };
+
 export type MensagemRecebida = {
   id: string;
   digitos: string; // número de quem mandou (só dígitos)
-  jidResposta: string;
+  jidResposta: string; // conversa privada ou o grupo
+  /** Mensagem de grupo: endereço do grupo. Null = conversa privada. */
+  grupo: string | null;
+  /** Nome que a pessoa usa no WhatsApp (pode ser vazio). */
+  nomeAutor: string;
+  /** No grupo: mencionou o robô (@) ou respondeu a uma mensagem dele. */
+  chamouRobo: boolean;
+  chave: ChaveMensagem;
   tipo: "texto" | "audio" | "imagem" | "documento" | "outro";
   texto: string;
   /** Tamanho anunciado do arquivo (antes de baixar), em bytes; 0 se não souber. */
@@ -72,6 +81,23 @@ export function conectado(): boolean {
 
 function digitosDoJid(jid: string): string {
   return jidNormalizedUser(jid).split("@")[0].split(":")[0].replace(/\D/g, "");
+}
+
+/** "5511...:12@s.whatsapp.net" -> "5511...@s.whatsapp.net" (tira o aparelho). */
+function semDispositivo(jid: string): string {
+  return jidNormalizedUser(jid);
+}
+
+/** Os endereços do próprio robô: pelo número e pelo código (LID). */
+function idsDoRobo(s: WASocket): Set<string> {
+  const ids = new Set<string>();
+  if (s.user?.id) ids.add(semDispositivo(s.user.id));
+  if (s.user?.lid) ids.add(semDispositivo(s.user.lid));
+  return ids;
+}
+
+function tirarMencaoDoRobo(texto: string, meus: Set<string>): string {
+  return tirarMencoes(texto, [...meus].map((j) => j.split("@")[0]));
 }
 
 /** Liga a conexão (e religa sozinha quando cair). */
@@ -161,12 +187,18 @@ function agendarReconexao(ms: number) {
 async function interpretar(s: WASocket, m: WAMessage): Promise<MensagemRecebida | null> {
   const jid = m.key.remoteJid;
   if (!jid || m.key.fromMe || !m.message || !m.key.id) return null;
-  if (isJidGroup(jid) || isJidStatusBroadcast(jid) || jid.endsWith("@newsletter") || jid.endsWith("@broadcast")) return null;
+  if (isJidStatusBroadcast(jid) || jid.endsWith("@newsletter") || jid.endsWith("@broadcast")) return null;
+  const grupo = isJidGroup(jid) ? jid : null;
 
-  // O WhatsApp às vezes identifica a pessoa por um código (LID) em vez do número.
-  let jidNumero: string | null = jid;
-  if (isLidUser(jid)) {
-    jidNumero = m.key.remoteJidAlt ?? (await s.signalRepository.lidMapping.getPNForLID(jid).catch(() => null));
+  // No grupo, quem mandou vem em "participant". O WhatsApp às vezes
+  // identifica a pessoa por um código (LID) em vez do número.
+  const jidPessoa = grupo ? m.key.participant : jid;
+  if (!jidPessoa) return null;
+  let jidNumero: string | null | undefined = jidPessoa;
+  if (isLidUser(jidPessoa)) {
+    jidNumero =
+      (grupo ? m.key.participantAlt : m.key.remoteJidAlt) ??
+      (await s.signalRepository.lidMapping.getPNForLID(jidPessoa).catch(() => null));
   }
   if (!jidNumero) return null;
   const digitos = digitosDoJid(jidNumero);
@@ -195,10 +227,28 @@ async function interpretar(s: WASocket, m: WAMessage): Promise<MensagemRecebida 
   }
   // vídeos, figurinhas, localização etc. ficam como "outro" (ignorados)
 
+  let chamouRobo = false;
+  if (grupo) {
+    const contexto =
+      conteudo?.extendedTextMessage?.contextInfo ??
+      conteudo?.imageMessage?.contextInfo ??
+      conteudo?.documentMessage?.contextInfo ??
+      conteudo?.audioMessage?.contextInfo;
+    const meus = idsDoRobo(s);
+    const mencionou = (contexto?.mentionedJid ?? []).some((j) => meus.has(semDispositivo(j)));
+    const respondeu = !!contexto?.stanzaId && !!contexto.participant && meus.has(semDispositivo(contexto.participant));
+    chamouRobo = mencionou || respondeu;
+    texto = tirarMencaoDoRobo(texto, meus);
+  }
+
   return {
     id: m.key.id,
     digitos,
     jidResposta: jid,
+    grupo,
+    nomeAutor: (m.pushName ?? "").trim().slice(0, 100),
+    chamouRobo,
+    chave: { remoteJid: jid, id: m.key.id, ...(m.key.participant ? { participant: m.key.participant } : {}) },
     tipo,
     texto: texto.trim(),
     tamanho: Number(conteudo?.imageMessage?.fileLength ?? conteudo?.documentMessage?.fileLength ?? conteudo?.audioMessage?.fileLength ?? 0) || 0,
@@ -255,11 +305,54 @@ export async function digitando(jid: string, ligado: boolean) {
   }
 }
 
-export async function marcarComoLida(jid: string, id: string) {
+export async function marcarComoLida(jid: string, id: string, participant?: string) {
   try {
-    await sock?.readMessages([{ remoteJid: jid, id, fromMe: false }]);
+    await sock?.readMessages([{ remoteJid: jid, id, fromMe: false, ...(participant ? { participant } : {}) }]);
   } catch {
     // não é importante
+  }
+}
+
+// ------------------------------------------------------------------ grupos
+
+/**
+ * Responde no grupo, citando a mensagem de quem chamou. "digitosDeQuemChamou"
+ * respeita o modo "só números liberados" (vale o número de quem pediu).
+ */
+export async function enviarNoGrupo(grupo: string, texto: string, digitosDeQuemChamou: string, citar?: { chave: ChaveMensagem; texto: string }) {
+  if (!sock || !conectado()) throw new Error("WhatsApp não está conectado");
+  if (!numeroPermitido(digitosDeQuemChamou, config.numerosPermitidos)) throw new Error("número fora da lista de números liberados");
+  const quoted = citar ? ({ key: { ...citar.chave, fromMe: false }, message: { conversation: citar.texto || "…" } } as WAMessage) : undefined;
+  await sock.sendMessage(grupo, { text: texto }, quoted ? { quoted } : undefined);
+}
+
+export async function enviarDocumentoNoGrupo(grupo: string, digitosDeQuemChamou: string, arquivo: Buffer, nome: string, mime: string) {
+  if (!sock || !conectado()) throw new Error("WhatsApp não está conectado");
+  if (!numeroPermitido(digitosDeQuemChamou, config.numerosPermitidos)) throw new Error("número fora da lista de números liberados");
+  await sock.sendMessage(grupo, { document: arquivo, fileName: nome, mimetype: mime });
+}
+
+/** Reação discreta numa mensagem (ex.: 📥 guardado, ✅ lido). */
+export async function reagir(chave: ChaveMensagem, emoji: string) {
+  try {
+    await sock?.sendMessage(chave.remoteJid, { react: { text: emoji, key: { ...chave, fromMe: false } } });
+  } catch {
+    // não é importante
+  }
+}
+
+const nomesDeGrupo = new Map<string, { nome: string; em: number }>();
+
+/** Nome do grupo (guardado por 1 hora). */
+export async function nomeDoGrupo(grupo: string): Promise<string> {
+  const guardado = nomesDeGrupo.get(grupo);
+  if (guardado && Date.now() - guardado.em < 3_600_000) return guardado.nome;
+  try {
+    const nome = ((await sock?.groupMetadata(grupo))?.subject ?? "").trim().slice(0, 200);
+    nomesDeGrupo.set(grupo, { nome, em: Date.now() });
+    return nome;
+  } catch {
+    return guardado?.nome ?? "";
   }
 }
 

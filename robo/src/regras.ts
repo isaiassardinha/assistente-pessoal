@@ -181,3 +181,20 @@ export function limitarEmojis(texto: string, maximo = 1): string {
   let contagem = 0;
   return texto.replace(/\p{Extended_Pictographic}(️|‍\p{Extended_Pictographic})*/gu, (e) => (++contagem <= maximo ? e : ""));
 }
+
+// ------------------------------------------------------------------ grupos
+
+/** Tira do texto as menções "@5511999998888" (ou "@<código>") dos números dados. */
+export function tirarMencoes(texto: string, usuarios: string[]): string {
+  let t = texto;
+  for (const u of usuarios.filter(Boolean)) {
+    t = t.replace(new RegExp(`@${u.replace(/[^0-9A-Za-z]/g, "")}\\b`, "g"), " ");
+  }
+  return t.replace(/[ \t]{2,}/g, " ").replace(/^[\s,:;-]+/, "").trim();
+}
+
+/** Possíveis códigos de ligação de grupo (6 letras/números, sem 0/O/1/I) ditos na mensagem. */
+export function codigosDeLigacao(texto: string): string[] {
+  const achados = texto.match(/(?<![A-Za-z0-9])[A-HJ-NP-Za-hj-np-z2-9]{6}(?![A-Za-z0-9])/g) ?? [];
+  return [...new Set(achados.map((c) => c.toUpperCase()))].slice(0, 5);
+}

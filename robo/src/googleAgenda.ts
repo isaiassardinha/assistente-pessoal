@@ -150,7 +150,7 @@ export function idDeEventoValido(id: unknown): id is string {
 }
 
 /** Depois que a pessoa autoriza no Google: troca o código de uso único pelo token de renovação. */
-export async function trocarCodigo(codigo: string, redirectUri: string): Promise<string> {
+export async function trocarCodigo(codigo: string, redirectUri: string, permissao: "agenda" | "drive" = "agenda"): Promise<string> {
   if (!config.googleClientId || !config.googleClientSecret) throw new GoogleRecusou("login do Google não configurado no servidor");
   const r = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -167,8 +167,13 @@ export async function trocarCodigo(codigo: string, redirectUri: string): Promise
   const dados = (await r.json().catch(() => ({}))) as { refresh_token?: string; scope?: string; error?: string };
   if (!r.ok) throw new GoogleRecusou(`troca do código: ${r.status} ${dados.error ?? ""}`);
   if (!dados.refresh_token) throw new GoogleRecusou("o Google não mandou o token de renovação");
-  if (!(dados.scope ?? "").split(" ").some((s) => s.endsWith("/auth/calendar.events") || s.endsWith("/auth/calendar"))) {
-    throw new SemPermissaoMarcada("a permissão da agenda não foi marcada");
+  const escopos = (dados.scope ?? "").split(" ");
+  const temPermissao =
+    permissao === "drive"
+      ? escopos.some((s) => s.endsWith("/auth/drive.file") || s.endsWith("/auth/drive"))
+      : escopos.some((s) => s.endsWith("/auth/calendar.events") || s.endsWith("/auth/calendar"));
+  if (!temPermissao) {
+    throw new SemPermissaoMarcada(`a permissão ${permissao === "drive" ? "do Drive" : "da agenda"} não foi marcada`);
   }
   return dados.refresh_token;
 }

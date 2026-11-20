@@ -70,3 +70,35 @@ describe("todo acesso a dados pessoais é filtrado pelo dono", () => {
     });
   }
 });
+
+// Espaços: o "dono" é o espaço. Toda função que mexe nas tabelas de espaço
+// recebe o espacoId e filtra por ele.
+const TABELAS_ESPACO = ["espacos", "espaco_membros", "espaco_mensagens", "espaco_documentos", "espaco_trechos"];
+const EXCECOES_ESPACO = new Set([
+  "espacoDoGrupo", // acha o espaço pelo grupo do WhatsApp
+  "ligarGrupo", // acha o espaço pelo código (e confere o admin)
+  "mensagensParaIndexar", // filas da rotina
+  "documentosEspacoParaProcessar",
+]);
+
+describe("todo acesso a espaço é filtrado pelo espaço", () => {
+  const doEspaco = funcoes.filter(({ corpo }) => TABELAS_ESPACO.some((t) => corpo.includes(`from("${t}")`)));
+
+  it("encontrou as funções de espaço", () => {
+    expect(doEspaco.length).toBeGreaterThan(15);
+  });
+
+  for (const { nome, corpo } of doEspaco) {
+    if (EXCECOES_ESPACO.has(nome)) continue;
+    it(`${nome} recebe espacoId e filtra por ele`, () => {
+      const parametros = corpo.slice(0, corpo.indexOf(")"));
+      expect(parametros).toContain("espacoId: string");
+      const filtra =
+        corpo.includes('.eq("espaco_id", espacoId)') || corpo.includes('.eq("id", espacoId)') || /espaco_id: espacoId/.test(corpo);
+      expect(filtra).toBe(true);
+      if (/\.(update|delete|select)\(/.test(corpo) && !/\.insert\(/.test(corpo)) {
+        expect(corpo.includes('.eq("espaco_id", espacoId)') || corpo.includes('.eq("id", espacoId)')).toBe(true);
+      }
+    });
+  }
+});

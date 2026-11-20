@@ -14,6 +14,7 @@ export function Cabecalho({ nome, admin }: { nome: string; admin: boolean }) {
     { href: "/painel/tarefas", rotulo: "Tarefas" },
     { href: "/painel/lembretes", rotulo: "Lembretes" },
     { href: "/painel/cerebro", rotulo: "Cérebro" },
+    { href: "/painel/espacos", rotulo: "Espaços" },
     { href: "/painel/conta", rotulo: "Minha conta" },
   ];
   if (admin)

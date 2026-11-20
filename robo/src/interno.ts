@@ -15,6 +15,7 @@ import { emailValido, senhaDeAppValida } from "./email";
 import { redirectUriValido } from "./googleAgenda";
 import { compromissosDe, conectarAgenda, conectarGmail, conectarGoogleAgenda, ConexaoInvalida } from "./pessoal";
 import { acordarCerebro } from "./rotinas";
+import { apagarDocumentos, apagarEspaco, ArquivoIndisponivel, baixarDocumento, buscarNoEspaco, conectarDriveEspaco } from "./espacos";
 import { comUso } from "./uso";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
 
@@ -177,6 +178,9 @@ export function iniciarApiInterna() {
           throw e;
         }
       }
+      if (rota.startsWith("POST /espacos/") || rota === "GET /espacos/arquivo") {
+        return await rotaDeEspaco(rota, req, res);
+      }
       if (rota === "GET /agenda") {
         const p = new URL(req.url ?? "/", "http://x").searchParams;
         const usuarioId = p.get("usuarioId") ?? "";
@@ -206,4 +210,92 @@ export function iniciarApiInterna() {
     }
   });
   servidor.listen(config.portaInterna, "127.0.0.1", () => log.info(`API interna em 127.0.0.1:${config.portaInterna}`));
+}
+
+// ------------------------------------------------------------- espaços
+// O site manda quem está logado (usuarioId) e o espaço; o robô confere se a
+// pessoa é membro (ou admin, quando precisa) antes de qualquer coisa.
+
+async function rotaDeEspaco(rota: string, req: IncomingMessage, res: ServerResponse) {
+  const corpo = rota.startsWith("GET ") ? Object.fromEntries(new URL(req.url ?? "/", "http://x").searchParams) : await lerCorpo(req);
+  const usuarioId = String(corpo.usuarioId ?? "");
+  const espacoId = String(corpo.espacoId ?? "");
+  if (!UUID.test(usuarioId) || !UUID.test(espacoId)) return json(res, 400, { ok: false, erro: "pedido inválido" });
+  const perfil = await banco.perfilParaVerificacao(usuarioId);
+  if (!perfil || perfil.status !== "aprovado") return json(res, 403, { ok: false, erro: "Cadastro não aprovado." });
+  const [espaco, papel] = await Promise.all([banco.espacoPorId(espacoId), banco.papelNoEspaco(espacoId, usuarioId)]);
+  if (!espaco || !papel) return json(res, 404, { ok: false, erro: "Espaço não encontrado." });
+
+  if (rota === "POST /espacos/perguntar") {
+    const pergunta = String(corpo.pergunta ?? "").trim().slice(0, 500);
+    if (pergunta.length < 2) return json(res, 400, { ok: false, erro: "Escreva a pergunta." });
+    if (!limitePerguntas.permitir(usuarioId)) return json(res, 200, { ok: false, erro: "Muitas perguntas seguidas. Espere um minuto." });
+    try {
+      const resposta = await comUso(usuarioId, async () => {
+        const trechos = await buscarNoEspaco(espaco.id, pergunta, 10);
+        if (trechos.length === 0) return `Não encontrei nada sobre isso na memória do espaço "${espaco.nome}".`;
+        return responderComFontes(pergunta, trechos, `o grupo "${espaco.nome}"`);
+      });
+      return json(res, 200, { ok: true, resposta: resposta || "Não consegui montar uma resposta agora." });
+    } catch (e) {
+      if (e instanceof IaIndisponivel) return json(res, 200, { ok: false, erro: "A inteligência artificial está instável agora. Tente de novo em instantes." });
+      throw e;
+    }
+  }
+
+  const documentoId = String(corpo.documentoId ?? "");
+  if (rota === "GET /espacos/arquivo" || rota === "POST /espacos/apagar-documento" || rota === "POST /espacos/reler-documento") {
+    if (!UUID.test(documentoId)) return json(res, 400, { ok: false, erro: "pedido inválido" });
+    const [doc] = await banco.documentosEspacoPorIds(espaco.id, [documentoId]);
+    if (!doc) return json(res, 404, { ok: false, erro: "Documento não encontrado." });
+
+    if (rota === "GET /espacos/arquivo") {
+      try {
+        const dados = await baixarDocumento(espaco, doc);
+        res.writeHead(200, {
+          "Content-Type": doc.tipo_mime ?? "application/octet-stream",
+          "Content-Length": dados.length,
+          "X-Nome-Arquivo": encodeURIComponent(doc.nome_arquivo),
+          "Cache-Control": "no-store",
+        });
+        return res.end(dados);
+      } catch (e) {
+        if (e instanceof ArquivoIndisponivel) return json(res, 410, { ok: false, erro: e.message });
+        throw e;
+      }
+    }
+    if (rota === "POST /espacos/reler-documento") {
+      const ok = await banco.relerDocumentoEspaco(espaco.id, doc.id);
+      if (ok) acordarCerebro();
+      return json(res, 200, { ok });
+    }
+    if (papel !== "admin" && doc.enviado_por !== usuarioId) {
+      return json(res, 403, { ok: false, erro: "Só quem mandou o documento ou um administrador do espaço pode apagar." });
+    }
+    await apagarDocumentos(espaco, [doc.id]);
+    return json(res, 200, { ok: true });
+  }
+
+  // daqui para baixo: só administrador
+  if (papel !== "admin") return json(res, 403, { ok: false, erro: "Só administradores do espaço podem fazer isso." });
+
+  if (rota === "POST /espacos/drive") {
+    const codigo = String(corpo.codigo ?? "");
+    const redirectUri = String(corpo.redirectUri ?? "");
+    if (!config.chaveConexoes) return json(res, 503, { ok: false, erro: "O servidor ainda não está pronto para conexões. Tente em alguns minutos." });
+    if (!config.googleClientId || !config.googleClientSecret) return json(res, 503, { ok: false, erro: "O login do Google ainda não foi configurado no servidor." });
+    if (codigo.length < 10 || codigo.length > 2000 || !redirectUriValido(redirectUri)) return json(res, 400, { ok: false, erro: "pedido inválido" });
+    try {
+      await conectarDriveEspaco(espaco, codigo, redirectUri);
+      return json(res, 200, { ok: true });
+    } catch (e) {
+      if (e instanceof ConexaoInvalida) return json(res, 200, { ok: false, erro: e.message });
+      throw e;
+    }
+  }
+  if (rota === "POST /espacos/apagar") {
+    await apagarEspaco(espaco);
+    return json(res, 200, { ok: true });
+  }
+  return json(res, 404, { ok: false, erro: "não encontrado" });
 }

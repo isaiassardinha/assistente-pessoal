@@ -238,7 +238,7 @@ export async function lerAcaoPendente(usuarioId: string) {
   falhou("ler ação pendente", error);
   return data as {
     tipo: string;
-    dados: { ids: string[]; descricao: string[] };
+    dados: { ids: string[]; descricao: string[]; espacoId?: string };
   } | null;
 }
 
@@ -1244,4 +1244,394 @@ export async function limparEmailsEAvisosAntigos() {
   falhou("limpar e-mails", e1);
   const { error: e2 } = await db().from("avisos_agenda").delete().lt("inicio", antes7);
   falhou("limpar avisos da agenda", e2);
+}
+
+// ================================================================ espaços
+// Espaços compartilhados (grupos do WhatsApp). Mesma regra dos dados
+// pessoais, mas o "dono" é o espaço: toda função recebe o espacoId e filtra
+// por ele (teste em banco.test.ts). Quem pode o quê (membro/admin) é
+// conferido por quem chama, com papelNoEspaco.
+
+export type Espaco = {
+  id: string;
+  nome: string;
+  grupo_jid: string | null;
+  grupo_nome: string | null;
+  drive_pasta_id: string | null;
+  drive_situacao: "ok" | "erro" | null;
+  drive_conta: string | null;
+  drive_segredo_cifrado: string | null;
+};
+
+const CAMPOS_ESPACO = "id, nome, grupo_jid, grupo_nome, drive_pasta_id, drive_situacao, drive_conta, drive_segredo_cifrado";
+const COFRE_ESPACOS = "espacos";
+
+function conferirPastaEspaco(espacoId: string, caminho: string) {
+  if (!caminho.startsWith(`${espacoId}/`) || caminho.includes("..")) throw new Error("arquivo fora da pasta do espaço");
+}
+
+/** Qual espaço está ligado a este grupo do WhatsApp (ou null). */
+export async function espacoDoGrupo(grupoJid: string): Promise<Espaco | null> {
+  const { data, error } = await db().from("espacos").select(CAMPOS_ESPACO).eq("grupo_jid", grupoJid).maybeSingle();
+  falhou("espaço do grupo", error);
+  return (data as Espaco) ?? null;
+}
+
+export async function espacoPorId(espacoId: string): Promise<Espaco | null> {
+  const { data, error } = await db().from("espacos").select(CAMPOS_ESPACO).eq("id", espacoId).maybeSingle();
+  falhou("espaço", error);
+  return (data as Espaco) ?? null;
+}
+
+export async function papelNoEspaco(espacoId: string, usuarioId: string): Promise<"admin" | "membro" | null> {
+  const { data, error } = await db()
+    .from("espaco_membros")
+    .select("papel")
+    .eq("espaco_id", espacoId)
+    .eq("usuario_id", usuarioId)
+    .maybeSingle();
+  falhou("papel no espaço", error);
+  return ((data as { papel: "admin" | "membro" } | null)?.papel ?? null);
+}
+
+export type ResultadoLigacao =
+  | { ok: true; espaco: Espaco }
+  | { ok: false; motivo: "codigo" | "nao_admin" | "grupo_ja_ligado" };
+
+/** Liga um grupo a um espaço pelo código (só um admin daquele espaço pode). */
+export async function ligarGrupo(codigo: string, grupoJid: string, grupoNome: string, usuarioId: string): Promise<ResultadoLigacao> {
+  const { data, error } = await db()
+    .from("espacos")
+    .select(CAMPOS_ESPACO)
+    .eq("codigo_ligacao", codigo)
+    .gt("codigo_expira_em", new Date().toISOString())
+    .maybeSingle();
+  falhou("achar código", error);
+  const espaco = data as Espaco | null;
+  if (!espaco) return { ok: false, motivo: "codigo" };
+  if ((await papelNoEspaco(espaco.id, usuarioId)) !== "admin") return { ok: false, motivo: "nao_admin" };
+  const outro = await espacoDoGrupo(grupoJid);
+  if (outro && outro.id !== espaco.id) return { ok: false, motivo: "grupo_ja_ligado" };
+  const { data: ligado, error: e2 } = await db()
+    .from("espacos")
+    .update({ grupo_jid: grupoJid, grupo_nome: grupoNome.slice(0, 200) || null, codigo_ligacao: null, codigo_expira_em: null })
+    .eq("id", espaco.id)
+    .select(CAMPOS_ESPACO)
+    .single();
+  falhou("ligar grupo", e2);
+  return { ok: true, espaco: ligado as Espaco };
+}
+
+export async function atualizarNomeDoGrupo(espacoId: string, grupoNome: string) {
+  const { error } = await db().from("espacos").update({ grupo_nome: grupoNome.slice(0, 200) }).eq("id", espacoId);
+  falhou("nome do grupo", error);
+}
+
+export async function salvarDriveDoEspaco(espacoId: string, conta: string, segredoCifrado: string, pastaId: string) {
+  const { error } = await db()
+    .from("espacos")
+    .update({ drive_conta: conta.slice(0, 200), drive_segredo_cifrado: segredoCifrado, drive_pasta_id: pastaId, drive_situacao: "ok" })
+    .eq("id", espacoId);
+  falhou("salvar Drive do espaço", error);
+}
+
+export async function marcarDriveDoEspaco(espacoId: string, situacao: "ok" | "erro", pastaId?: string) {
+  const { error } = await db()
+    .from("espacos")
+    .update({ drive_situacao: situacao, ...(pastaId ? { drive_pasta_id: pastaId } : {}) })
+    .eq("id", espacoId);
+  falhou("situação do Drive", error);
+}
+
+export async function apagarEspaco(espacoId: string) {
+  const { error } = await db().from("espacos").delete().eq("id", espacoId);
+  falhou("apagar espaço", error);
+}
+
+// ------------------------------------------------------- mensagens do grupo
+
+export type MensagemEspaco = {
+  id: number;
+  autor_id: string | null;
+  autor_nome: string;
+  do_robo: boolean;
+  tipo: "texto" | "audio";
+  texto: string;
+  criado_em: string;
+};
+
+const CAMPOS_MENSAGEM_ESPACO = "id, autor_id, autor_nome, do_robo, tipo, texto, criado_em";
+
+export async function guardarMensagemEspaco(
+  espacoId: string,
+  m: { autor_id: string | null; autor_nome: string; texto: string; tipo?: "texto" | "audio"; id_whatsapp?: string | null; do_robo?: boolean },
+): Promise<MensagemEspaco> {
+  const { data, error } = await db()
+    .from("espaco_mensagens")
+    .insert({
+      espaco_id: espacoId,
+      autor_id: m.autor_id,
+      autor_nome: m.autor_nome.slice(0, 100) || "Alguém",
+      texto: m.texto.slice(0, 4000),
+      tipo: m.tipo ?? "texto",
+      id_whatsapp: m.id_whatsapp?.slice(0, 200) ?? null,
+      do_robo: m.do_robo ?? false,
+      indexada: m.do_robo ?? false, // respostas do robô não viram memória
+    })
+    .select(CAMPOS_MENSAGEM_ESPACO)
+    .single();
+  falhou("guardar mensagem do espaço", error);
+  return data as MensagemEspaco;
+}
+
+/** Últimas mensagens do grupo (mais antigas primeiro), para dar contexto à IA. */
+export async function mensagensRecentesEspaco(espacoId: string, quantidade = 30): Promise<MensagemEspaco[]> {
+  const { data, error } = await db()
+    .from("espaco_mensagens")
+    .select(CAMPOS_MENSAGEM_ESPACO)
+    .eq("espaco_id", espacoId)
+    .order("criado_em", { ascending: false })
+    .limit(quantidade);
+  falhou("mensagens recentes do espaço", error);
+  return ((data ?? []) as MensagemEspaco[]).reverse();
+}
+
+/** Mensagens de um período (para "o que foi falado ontem?"). */
+export async function mensagensDoPeriodoEspaco(espacoId: string, de: string, ate: string, limite = 300): Promise<MensagemEspaco[]> {
+  const { data, error } = await db()
+    .from("espaco_mensagens")
+    .select(CAMPOS_MENSAGEM_ESPACO)
+    .eq("espaco_id", espacoId)
+    .eq("do_robo", false)
+    .gte("criado_em", de)
+    .lt("criado_em", ate)
+    .order("criado_em")
+    .limit(limite);
+  falhou("mensagens do período", error);
+  return (data ?? []) as MensagemEspaco[];
+}
+
+export async function mensagensEspacoPorIds(espacoId: string, ids: number[]): Promise<MensagemEspaco[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await db().from("espaco_mensagens").select(CAMPOS_MENSAGEM_ESPACO).eq("espaco_id", espacoId).in("id", ids);
+  falhou("mensagens por id", error);
+  return (data ?? []) as MensagemEspaco[];
+}
+
+/** Fila: mensagens ainda não pesquisáveis (de todos os espaços). */
+export async function mensagensParaIndexar(limite = 50) {
+  const { data, error } = await db()
+    .from("espaco_mensagens")
+    .select("id, espaco_id, autor_id, autor_nome, texto, criado_em")
+    .eq("indexada", false)
+    .order("criado_em")
+    .limit(limite);
+  falhou("mensagens a indexar", error);
+  return (data ?? []) as { id: number; espaco_id: string; autor_id: string | null; autor_nome: string; texto: string; criado_em: string }[];
+}
+
+/** Grava o trecho pesquisável da mensagem (ou só marca, se for curta demais). */
+export async function indexarMensagemEspaco(espacoId: string, id: number, conteudo: string | null, vetor: number[] | null) {
+  if (conteudo && vetor) {
+    const { error } = await db()
+      .from("espaco_trechos")
+      .insert({ espaco_id: espacoId, mensagem_id: id, conteudo: conteudo.slice(0, 4000), vetor: JSON.stringify(vetor) });
+    // a mensagem pode ter sido apagada no meio do caminho: não é erro
+    if (error && error.code !== "23503") falhou("trecho da mensagem", error);
+  }
+  const { error: e2 } = await db().from("espaco_mensagens").update({ indexada: true }).eq("espaco_id", espacoId).eq("id", id);
+  falhou("marcar mensagem", e2);
+}
+
+// ----------------------------------------------------- documentos do espaço
+
+export type DocumentoEspaco = {
+  id: string;
+  espaco_id: string;
+  enviado_por: string | null;
+  enviado_por_nome: string;
+  nome_arquivo: string;
+  descricao: string;
+  tipo_mime: string | null;
+  tamanho_bytes: number;
+  armazenamento: "supabase" | "drive";
+  caminho: string | null;
+  drive_id: string | null;
+  mensagem_whatsapp: { remoteJid: string; id: string; participant?: string } | null;
+  status: string;
+  resumo: string | null;
+  erro: string | null;
+  tentativas: number;
+  criado_em: string;
+};
+
+const CAMPOS_DOC_ESPACO =
+  "id, espaco_id, enviado_por, enviado_por_nome, nome_arquivo, descricao, tipo_mime, tamanho_bytes, armazenamento, caminho, drive_id, mensagem_whatsapp, status, resumo, erro, tentativas, criado_em";
+
+export async function guardarArquivoEspaco(espacoId: string, caminho: string, dados: Buffer, mime: string) {
+  conferirPastaEspaco(espacoId, caminho);
+  const { error } = await db().storage.from(COFRE_ESPACOS).upload(caminho, dados, { contentType: mime, upsert: false });
+  falhou("guardar arquivo do espaço", error as never);
+}
+
+export async function baixarArquivoEspaco(espacoId: string, caminho: string): Promise<Buffer> {
+  conferirPastaEspaco(espacoId, caminho);
+  const { data, error } = await db().storage.from(COFRE_ESPACOS).download(caminho);
+  falhou("baixar arquivo do espaço", error as never);
+  return Buffer.from(await (data as Blob).arrayBuffer());
+}
+
+export async function apagarArquivosEspaco(espacoId: string, caminhos: string[]) {
+  const dentro = caminhos.filter((c) => c.startsWith(`${espacoId}/`) && !c.includes(".."));
+  for (let i = 0; i < dentro.length; i += 100) {
+    const { error } = await db().storage.from(COFRE_ESPACOS).remove(dentro.slice(i, i + 100));
+    falhou("apagar arquivos do espaço", error as never);
+  }
+}
+
+export async function registrarDocumentoEspaco(
+  espacoId: string,
+  doc: {
+    id: string;
+    enviado_por: string;
+    enviado_por_nome: string;
+    nome_arquivo: string;
+    descricao: string;
+    tipo_mime: string;
+    tamanho_bytes: number;
+    armazenamento: "supabase" | "drive";
+    caminho: string | null;
+    drive_id: string | null;
+    mensagem_whatsapp: DocumentoEspaco["mensagem_whatsapp"];
+  },
+): Promise<DocumentoEspaco> {
+  if (doc.caminho) conferirPastaEspaco(espacoId, doc.caminho);
+  const { data, error } = await db()
+    .from("espaco_documentos")
+    .insert({ ...doc, espaco_id: espacoId, enviado_por_nome: doc.enviado_por_nome.slice(0, 100) })
+    .select(CAMPOS_DOC_ESPACO)
+    .single();
+  falhou("registrar documento do espaço", error);
+  return data as DocumentoEspaco;
+}
+
+export async function documentosEspaco(espacoId: string, limite = 50): Promise<DocumentoEspaco[]> {
+  const { data, error } = await db()
+    .from("espaco_documentos")
+    .select(CAMPOS_DOC_ESPACO)
+    .eq("espaco_id", espacoId)
+    .order("criado_em", { ascending: false })
+    .limit(limite);
+  falhou("documentos do espaço", error);
+  return (data ?? []) as DocumentoEspaco[];
+}
+
+export async function documentosEspacoPorIds(espacoId: string, ids: string[]): Promise<DocumentoEspaco[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await db().from("espaco_documentos").select(CAMPOS_DOC_ESPACO).eq("espaco_id", espacoId).in("id", ids);
+  falhou("documentos do espaço por id", error);
+  return (data ?? []) as DocumentoEspaco[];
+}
+
+/** Apaga as fichas (os trechos vão junto) e devolve onde estavam os arquivos. */
+export async function apagarDocumentosEspaco(espacoId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  const { data, error } = await db()
+    .from("espaco_documentos")
+    .delete()
+    .eq("espaco_id", espacoId)
+    .in("id", ids)
+    .select("id, armazenamento, caminho, drive_id");
+  falhou("apagar documentos do espaço", error);
+  return (data ?? []) as { id: string; armazenamento: "supabase" | "drive"; caminho: string | null; drive_id: string | null }[];
+}
+
+/** Fila de leitura dos documentos de espaços (todos os espaços). */
+export async function documentosEspacoParaProcessar(limite = 3) {
+  const travado = new Date(Date.now() - TRAVADO_HA).toISOString();
+  const { data, error } = await db()
+    .from("espaco_documentos")
+    .select("id, espaco_id, enviado_por, status, status_em, tentativas")
+    .or(`status.eq.pendente,and(status.eq.processando,status_em.lt.${travado})`)
+    .order("status_em")
+    .limit(limite);
+  falhou("documentos do espaço a processar", error);
+  return (data ?? []) as { id: string; espaco_id: string; enviado_por: string | null; status: string; status_em: string; tentativas: number }[];
+}
+
+export async function reservarDocumentoEspaco(espacoId: string, d: { id: string; status: string; status_em: string; tentativas: number }) {
+  const { data, error } = await db()
+    .from("espaco_documentos")
+    .update({ status: "processando", status_em: new Date().toISOString(), tentativas: d.tentativas + 1, erro: null })
+    .eq("espaco_id", espacoId)
+    .eq("id", d.id)
+    .eq("status", d.status)
+    .eq("status_em", d.status_em)
+    .select(CAMPOS_DOC_ESPACO);
+  falhou("reservar documento do espaço", error);
+  return (data?.[0] as DocumentoEspaco) ?? null;
+}
+
+export async function gravarTrechosDocumentoEspaco(espacoId: string, documentoId: string, trechos: { conteudo: string; vetor: number[] }[]) {
+  const { error: e1 } = await db().from("espaco_trechos").delete().eq("espaco_id", espacoId).eq("documento_id", documentoId);
+  falhou("limpar trechos do documento do espaço", e1);
+  for (let i = 0; i < trechos.length; i += 100) {
+    const lote = trechos.slice(i, i + 100).map((t, n) => ({
+      espaco_id: espacoId,
+      documento_id: documentoId,
+      posicao: i + n,
+      conteudo: t.conteudo.slice(0, 4000),
+      vetor: JSON.stringify(t.vetor),
+    }));
+    const { error } = await db().from("espaco_trechos").insert(lote);
+    falhou("gravar trechos do espaço", error);
+  }
+}
+
+export async function concluirDocumentoEspaco(espacoId: string, id: string, resumo: string) {
+  const agora = new Date().toISOString();
+  const { error } = await db()
+    .from("espaco_documentos")
+    .update({ status: "pronto", status_em: agora, processado_em: agora, resumo: resumo.slice(0, 600) || null, erro: null, erro_detalhe: null })
+    .eq("espaco_id", espacoId)
+    .eq("id", id);
+  falhou("concluir documento do espaço", error);
+}
+
+export async function falharDocumentoEspaco(espacoId: string, id: string, erro: string, definitivo: boolean, detalhe = "") {
+  const { error } = await db()
+    .from("espaco_documentos")
+    .update({
+      status: definitivo ? "erro" : "pendente",
+      status_em: new Date().toISOString(),
+      erro: erro.slice(0, 300),
+      erro_detalhe: detalhe.slice(0, 500) || null,
+    })
+    .eq("espaco_id", espacoId)
+    .eq("id", id);
+  falhou("falha no documento do espaço", error);
+}
+
+export async function relerDocumentoEspaco(espacoId: string, id: string): Promise<boolean> {
+  const { data, error } = await db()
+    .from("espaco_documentos")
+    .update({ status: "pendente", tentativas: 0, erro: null, erro_detalhe: null, status_em: new Date().toISOString() })
+    .eq("espaco_id", espacoId)
+    .eq("id", id)
+    .eq("status", "erro")
+    .select("id");
+  falhou("reler documento do espaço", error);
+  return (data?.length ?? 0) > 0;
+}
+
+export type TrechoAchadoEspaco = { documento_id: string | null; mensagem_id: number | null; conteudo: string; distancia: number };
+
+export async function buscarTrechosEspaco(espacoId: string, vetor: number[], limite = 8): Promise<TrechoAchadoEspaco[]> {
+  const { data, error } = await db().rpc("buscar_trechos_espaco", {
+    p_espaco: espacoId,
+    p_vetor: JSON.stringify(vetor),
+    p_limite: limite,
+  });
+  falhou("buscar trechos do espaço", error);
+  return (data ?? []) as TrechoAchadoEspaco[];
 }

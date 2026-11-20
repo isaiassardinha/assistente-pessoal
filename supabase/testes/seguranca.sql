@@ -777,6 +777,166 @@ select testes.deve_bloquear('select id from public.emails', 'visitante não vê 
 select testes.como_dono_do_banco();
 
 -- ---------------------------------------------------------------------
+-- 10g. ESPAÇOS COMPARTILHADOS (grupos do WhatsApp)
+--   Ana cria um espaço e convida o Bruno; Edu tem outro espaço.
+-- ---------------------------------------------------------------------
+select testes.como('00000000-0000-4000-a000-00000000d001');
+select testes.deve_bloquear($q$select public.criar_espaco('Espaço do Davi')$q$, 'cadastro recusado não cria espaço');
+
+select testes.como('00000000-0000-4000-a000-00000000e001');
+select set_config('testes.espaco_edu', public.criar_espaco('Família do Edu')::text, true);
+
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select set_config('testes.espaco_ana', public.criar_espaco('Obra da casa')::text, true);
+select testes.ok((select count(*) from public.espacos) = 1, 'Ana vê só o espaço dela');
+select testes.ok(
+  (select papel from public.espaco_membros where espaco_id = current_setting('testes.espaco_ana')::uuid) = 'admin',
+  'quem cria o espaço vira administrador');
+select testes.deve_bloquear($q$insert into public.espacos (nome) values ('direto')$q$, 'ninguém cria espaço direto na tabela');
+select testes.deve_bloquear(
+  format($q$insert into public.espaco_membros (espaco_id, usuario_id) values (%L, '00000000-0000-4000-a000-00000000c001')$q$,
+         current_setting('testes.espaco_ana')),
+  'ninguém põe membro direto na tabela');
+select testes.deve_bloquear('select drive_segredo_cifrado from public.espacos', 'nem o admin lê o token do Drive');
+select testes.deve_bloquear('select codigo_ligacao from public.espacos', 'código de ligação não fica legível na tabela');
+select testes.ok(public.gerar_codigo_espaco(current_setting('testes.espaco_ana')::uuid) ~ '^[A-Z2-9]{6}$',
+  'admin gera código de ligação de 6 caracteres');
+select testes.deve_bloquear(
+  format($q$select public.gerar_codigo_espaco(%L)$q$, current_setting('testes.espaco_edu')),
+  'Ana não gera código para o espaço do Edu');
+select testes.deve_bloquear(
+  format($q$select public.adicionar_membro_espaco(%L, 'ana@teste.invalid')$q$, current_setting('testes.espaco_edu')),
+  'Ana não se coloca no espaço do Edu');
+select testes.ok(
+  public.adicionar_membro_espaco(current_setting('testes.espaco_ana')::uuid, 'davi@teste.invalid') = 'nao_encontrado',
+  'cadastro recusado não entra em espaço');
+select testes.ok(
+  public.adicionar_membro_espaco(current_setting('testes.espaco_ana')::uuid, ' BRUNO@teste.invalid ') = 'ok',
+  'admin adiciona membro pelo e-mail (sem diferenciar maiúsculas)');
+select testes.ok(
+  public.adicionar_membro_espaco(current_setting('testes.espaco_ana')::uuid, 'bruno@teste.invalid') = 'ja_membro',
+  'não duplica membro');
+
+-- o robô grava a memória dos dois espaços
+select testes.como_servidor();
+update public.espacos set grupo_jid = '120363000000000001@g.us', drive_segredo_cifrado = 'v1:token-drive'
+ where id = current_setting('testes.espaco_ana')::uuid;
+insert into public.espaco_documentos (id, espaco_id, enviado_por, enviado_por_nome, nome_arquivo, tamanho_bytes, armazenamento, caminho, drive_id, erro_detalhe)
+values ('00000000-0000-4000-a500-000000000001', current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a000-00000000a001',
+        'Ana', 'orcamento-obra.pdf', 1000, 'supabase', current_setting('testes.espaco_ana') || '/orcamento-obra.pdf', null, 'detalhe interno'),
+       ('00000000-0000-4000-e500-000000000001', current_setting('testes.espaco_edu')::uuid, '00000000-0000-4000-a000-00000000e001',
+        'Edu', 'segredo-do-edu.pdf', 1000, 'drive', null, 'drive-123', null);
+select testes.deve_bloquear(
+  format($q$insert into public.espaco_documentos (espaco_id, nome_arquivo, tamanho_bytes, armazenamento) values (%L, 'x.pdf', 10, 'drive')$q$,
+         current_setting('testes.espaco_ana')),
+  'documento no Drive precisa do id do arquivo no Drive');
+select testes.deve_bloquear(
+  format($q$insert into public.espaco_documentos (espaco_id, nome_arquivo, tamanho_bytes, armazenamento, caminho)
+            values (%L, 'x.pdf', 10, 'supabase', %L)$q$, current_setting('testes.espaco_ana'), current_setting('testes.espaco_edu') || '/x.pdf'),
+  'arquivo do espaço da Ana não pode ficar na pasta do espaço do Edu');
+insert into public.espaco_mensagens (espaco_id, autor_id, autor_nome, texto) values
+  (current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a000-00000000a001', 'Ana', 'o pedreiro começa segunda'),
+  (current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a000-00000000b001', 'Bruno', 'o cimento chegou'),
+  (current_setting('testes.espaco_edu')::uuid, '00000000-0000-4000-a000-00000000e001', 'Edu', 'a senha do portão é 1234');
+insert into public.espaco_trechos (espaco_id, documento_id, conteudo, vetor)
+select current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a500-000000000001', 'orçamento: 50 mil', array_fill(0.1, array[768])::extensions.vector;
+insert into public.espaco_trechos (espaco_id, mensagem_id, conteudo, vetor)
+select espaco_id, id, texto, array_fill(0.1, array[768])::extensions.vector from public.espaco_mensagens;
+select testes.deve_bloquear(
+  format($q$insert into public.espaco_trechos (espaco_id, documento_id, conteudo, vetor)
+            select %L, '00000000-0000-4000-e500-000000000001', 'x', array_fill(0.1, array[768])::extensions.vector$q$,
+         current_setting('testes.espaco_ana')),
+  'trecho do espaço da Ana não pode apontar para documento do Edu');
+select testes.ok(
+  (select count(*) from public.buscar_trechos_espaco(current_setting('testes.espaco_ana')::uuid, array_fill(0.1, array[768])::extensions.vector, 30)) = 3,
+  'busca do espaço só traz trechos daquele espaço');
+select testes.ok(
+  (select count(*) from public.buscar_trechos('00000000-0000-4000-a000-00000000a001', array_fill(0.1, array[768])::extensions.vector, 30)) = 0,
+  'busca pessoal da Ana não traz nada do espaço');
+
+-- Bruno, como membro comum
+select testes.como('00000000-0000-4000-a000-00000000b001');
+select testes.ok((select count(*) from public.espacos) = 1 and (select nome from public.espacos) = 'Obra da casa',
+  'membro vê o espaço em que está, e só ele');
+select testes.ok((select count(*) from public.membros_do_espaco(current_setting('testes.espaco_ana')::uuid)) = 2,
+  'membro vê a lista de membros com os nomes');
+select testes.ok((select count(*) from public.perfis) = 1, 'ser do mesmo espaço não abre o perfil dos outros');
+select testes.deve_bloquear(
+  format($q$select * from public.membros_do_espaco(%L)$q$, current_setting('testes.espaco_edu')),
+  'Bruno não lista membros do espaço do Edu');
+select testes.ok((select count(*) from public.espaco_documentos) = 1 and (select nome_arquivo from public.espaco_documentos) = 'orcamento-obra.pdf',
+  'membro vê só os documentos do próprio espaço');
+select testes.ok((select count(*) from public.espaco_mensagens) = 2, 'membro vê só as mensagens do próprio espaço');
+select testes.deve_bloquear('select caminho from public.espaco_documentos', 'membro não vê o caminho interno do arquivo');
+select testes.deve_bloquear('select erro_detalhe from public.espaco_documentos', 'membro não vê o detalhe técnico');
+select testes.deve_bloquear('select * from public.espaco_trechos', 'ninguém logado lê os trechos do espaço');
+select testes.deve_bloquear(
+  format($q$select * from public.buscar_trechos_espaco(%L, array_fill(0.1, array[768])::extensions.vector, 5)$q$, current_setting('testes.espaco_ana')),
+  'só o servidor faz a busca pelo sentido do espaço');
+select testes.deve_bloquear(
+  format($q$insert into public.espaco_mensagens (espaco_id, autor_id, autor_nome, texto) values (%L, '00000000-0000-4000-a000-00000000a001', 'Ana', 'falso')$q$,
+         current_setting('testes.espaco_ana')),
+  'membro não grava mensagem falsa em nome de outro');
+select testes.deve_bloquear(
+  format($q$insert into public.espaco_documentos (espaco_id, nome_arquivo, tamanho_bytes, armazenamento, caminho) values (%L, 'x', 1, 'supabase', %L)$q$,
+         current_setting('testes.espaco_ana'), current_setting('testes.espaco_ana') || '/x'),
+  'membro não cria documento direto (só pelo robô)');
+select testes.deve_bloquear($q$delete from public.espaco_documentos$q$, 'membro não apaga documento direto (o robô confere a permissão)');
+select testes.deve_bloquear(
+  format($q$select public.adicionar_membro_espaco(%L, 'edu@teste.invalid')$q$, current_setting('testes.espaco_ana')),
+  'membro comum não adiciona ninguém');
+select testes.deve_bloquear(
+  format($q$select public.remover_membro_espaco(%L, '00000000-0000-4000-a000-00000000a001')$q$, current_setting('testes.espaco_ana')),
+  'membro comum não tira a admin');
+select testes.deve_bloquear(
+  format($q$select public.definir_papel_espaco(%L, '00000000-0000-4000-a000-00000000b001', 'admin')$q$, current_setting('testes.espaco_ana')),
+  'membro comum não se promove a admin');
+select testes.deve_bloquear(
+  format($q$select public.desconectar_drive_espaco(%L)$q$, current_setting('testes.espaco_ana')),
+  'membro comum não desconecta o Drive');
+select testes.ok(testes.linhas($q$update public.espacos set nome = 'invadido'$q$) = 0, 'membro comum não renomeia o espaço');
+select testes.ok(testes.linhas($q$delete from public.espaco_mensagens where autor_nome = 'Ana'$q$) = 0, 'Bruno não apaga a fala da Ana');
+select testes.ok(testes.linhas($q$delete from public.espaco_mensagens where autor_nome = 'Bruno'$q$) = 1, 'Bruno apaga a própria fala guardada');
+select testes.ok(public.remover_membro_espaco(current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a000-00000000b001'),
+  'membro pode sair do espaço');
+select testes.ok((select count(*) from public.espacos) = 0 and (select count(*) from public.espaco_documentos) = 0,
+  'quem saiu deixa de ver o espaço e os documentos');
+
+select testes.como_servidor();
+select testes.ok(
+  (select count(*) from public.espaco_trechos t join public.espaco_mensagens m on m.id = t.mensagem_id where m.autor_nome = 'Bruno') = 0
+  and (select count(*) from public.espaco_trechos where espaco_id = current_setting('testes.espaco_ana')::uuid) = 2,
+  'apagar a fala apaga o trecho pesquisável dela (e só dela)');
+
+-- espaço nunca fica sem admin; sem ninguém, some com tudo
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.ok(
+  public.adicionar_membro_espaco(current_setting('testes.espaco_ana')::uuid, 'bruno@teste.invalid') = 'ok',
+  'admin readiciona o Bruno');
+select testes.ok(testes.linhas($q$update public.espacos set nome = 'Obra da casa nova'$q$) = 1, 'admin renomeia o espaço');
+select testes.ok(public.remover_membro_espaco(current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a000-00000000a001'),
+  'a única admin pode sair');
+select testes.como('00000000-0000-4000-a000-00000000b001');
+select testes.ok(
+  (select papel from public.espaco_membros where usuario_id = '00000000-0000-4000-a000-00000000b001') = 'admin',
+  'quando o último admin sai, o membro mais antigo vira admin');
+select testes.ok(public.remover_membro_espaco(current_setting('testes.espaco_ana')::uuid, '00000000-0000-4000-a000-00000000b001'),
+  'o último membro sai');
+select testes.como_servidor();
+select testes.ok(
+  (select count(*) from public.espacos where id = current_setting('testes.espaco_ana')::uuid) = 0
+  and (select count(*) from public.espaco_documentos where espaco_id = current_setting('testes.espaco_ana')::uuid) = 0
+  and (select count(*) from public.espaco_mensagens where espaco_id = current_setting('testes.espaco_ana')::uuid) = 0
+  and (select count(*) from public.espaco_trechos where espaco_id = current_setting('testes.espaco_ana')::uuid) = 0,
+  'espaço sem ninguém é apagado com documentos, mensagens e trechos');
+select testes.ok((select count(*) from public.espacos where id = current_setting('testes.espaco_edu')::uuid) = 1,
+  'o espaço do Edu não foi afetado');
+select testes.como_anonimo();
+select testes.deve_bloquear('select id from public.espacos', 'visitante não vê espaços');
+select testes.deve_bloquear('select id from public.espaco_mensagens', 'visitante não vê mensagens de espaço');
+select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa
 -- ---------------------------------------------------------------------
 delete from auth.users where id = '00000000-0000-4000-a000-00000000b001';

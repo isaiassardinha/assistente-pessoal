@@ -5,12 +5,13 @@ import { hojeISO, instanteParaLocal } from "@/lib/datas";
 import { montarAvisoContas } from "./avisoContas";
 import * as banco from "./banco";
 import { indexarAnotacoes, processarDocumento } from "./cerebro";
+import { indexarMensagens, processarDocumentoEspaco } from "./espacos";
 import { IaIndisponivel } from "./ia";
 import { config, configuracoesFaltando } from "./config";
 import { log } from "./log";
 import { avisarCompromissos, cuidarDosEmails, enviarResumosDaManha } from "./pessoal";
 import { numeroPermitido } from "./regras";
-import { conectado, enviarTexto, NumeroSemWhatsApp } from "./whatsapp";
+import { conectado, enviarTexto, NumeroSemWhatsApp, reagir } from "./whatsapp";
 
 let rodando = false;
 let ultimaLimpeza = 0;
@@ -59,7 +60,19 @@ async function cuidarDoCerebro() {
         const r = await processarDocumento(item);
         if (r && r.doc.origem === "whatsapp" && (r.ok || r.definitivo)) await avisarLeitura(item.usuario_id, r);
       }
-      if (fila.length === 3) chamarDeNovo = true; // ainda pode ter mais
+      // espaços compartilhados (grupos)
+      await indexarMensagens();
+      const filaEspacos = await banco.documentosEspacoParaProcessar(3);
+      for (const item of filaEspacos) {
+        const r = await processarDocumentoEspaco(item);
+        // reação discreta na mensagem original: ✅ lido, ⚠️ não deu para ler
+        if (r?.doc.mensagem_whatsapp && conectado()) {
+          const final = await banco.documentosEspacoPorIds(r.espaco.id, [r.doc.id]);
+          if (final[0]?.status === "pronto") await reagir(r.doc.mensagem_whatsapp, "✅");
+          else if (final[0]?.status === "erro") await reagir(r.doc.mensagem_whatsapp, "⚠️");
+        }
+      }
+      if (fila.length === 3 || filaEspacos.length === 3) chamarDeNovo = true; // ainda pode ter mais
     } while (chamarDeNovo);
   } catch (e) {
     if (e instanceof IaIndisponivel) log.aviso("cérebro: IA indisponível, tento no próximo minuto");

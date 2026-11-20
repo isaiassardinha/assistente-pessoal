@@ -156,3 +156,21 @@ describe("data e dia ditos", () => {
     expect(diaFoiDito(1, ["todo dia 10"])).toBe(false);
   });
 });
+
+describe("grupos", () => {
+  it("tira a menção do robô do texto", async () => {
+    const { tirarMencoes } = await import("./regras");
+    expect(tirarMencoes("@5511916273194 qual o prazo do contrato?", ["5511916273194"])).toBe("qual o prazo do contrato?");
+    expect(tirarMencoes("Oi @123456789012345, tudo bem?", ["123456789012345"])).toBe("Oi , tudo bem?");
+    expect(tirarMencoes("fala com @5511999998888 depois", ["5511916273194"])).toBe("fala com @5511999998888 depois");
+  });
+
+  it("acha o código de ligação", async () => {
+    const { codigosDeLigacao } = await import("./regras");
+    expect(codigosDeLigacao("K7MPQ2")).toEqual(["K7MPQ2"]);
+    expect(codigosDeLigacao("ligar abcdef por favor")).toEqual(["ABCDEF"]);
+    expect(codigosDeLigacao("código: x9y8z7.")).toEqual(["X9Y8Z7"]);
+    expect(codigosDeLigacao("12345")).toEqual([]);
+    expect(codigosDeLigacao("O1O1O1")).toEqual([]); // 0, O, 1 e I não existem nos códigos
+  });
+});

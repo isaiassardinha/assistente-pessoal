@@ -7,6 +7,7 @@ import { hojeISO, instanteParaLocal } from "@/lib/datas";
 import * as banco from "./banco";
 import { config } from "./config";
 import { criarFerramentas } from "./ferramentas";
+import { tratarGrupo } from "./grupo";
 import { conversar, IaIndisponivel, transcreverAudio, type Turno } from "./ia";
 import { log } from "./log";
 import { LimitadorPorMinuto, limitarEmojis, numeroPermitido } from "./regras";
@@ -22,11 +23,13 @@ const MAXIMO_AUDIO = 10 * 1024 * 1024;
 const filas = new Map<string, Promise<void>>();
 
 export function receberMensagem(m: MensagemRecebida): Promise<void> {
-  const anterior = filas.get(m.digitos) ?? Promise.resolve();
-  const proxima = anterior.then(() => tratar(m)).catch((e) => log.erro("mensagem:", (e as Error).message));
-  filas.set(m.digitos, proxima);
+  // no grupo, a fila é do grupo inteiro (guarda na ordem em que chegou)
+  const chave = m.grupo ?? m.digitos;
+  const anterior = filas.get(chave) ?? Promise.resolve();
+  const proxima = anterior.then(() => (m.grupo ? tratarGrupo(m) : tratar(m))).catch((e) => log.erro("mensagem:", (e as Error).message));
+  filas.set(chave, proxima);
   proxima.finally(() => {
-    if (filas.get(m.digitos) === proxima) filas.delete(m.digitos);
+    if (filas.get(chave) === proxima) filas.delete(chave);
   });
   return proxima;
 }
@@ -51,6 +54,7 @@ O QUE VOCÊ FAZ (usando as ferramentas):
 - Contas a pagar: contas fixas (todo mês: aluguel, luz, internet...) e avulsas (boleto, IPVA); listar o que falta pagar, marcar como paga (já lança o gasto), desfazer, mudar valor do mês, ignorar um mês, pausar conta fixa. O robô avisa sozinho antes do vencimento, no dia e depois, enquanto não estiver paga.
 - Agenda pessoal (Google Agenda): ver compromissos ("o que tenho amanhã?"), marcar, mudar de dia/horário e cancelar compromissos. O robô avisa sozinho antes de cada compromisso. Marcar/mudar/cancelar só funciona se a agenda foi conectada pelo botão "Conectar com Google" (se a ferramenta disser que não, explique e ofereça um lembrete no WhatsApp no lugar).
 - E-mail pessoal (Gmail, só leitura): o robô lê os e-mails novos, avisa na hora os urgentes e manda o resumo da manhã; você lista e procura e-mails e cria regras ("fulano é sempre importante" = criar_regra_email importante; "ignora e-mails da loja X" = ignorar). Você só tem remetente, assunto e um resumo curto, nunca o texto completo; não responde nem apaga e-mails. Se não estiverem conectados, oriente: site → Minha conta → Conexões.
+- Grupos (espaços compartilhados): você pode ser colocado num grupo do WhatsApp; lá guarda o que os membros mandam e responde quando é marcado com @. Para ligar um grupo: no site, menu Espaços, criar o espaço, gerar o código e mandar o código no grupo marcando você. O que é do grupo não aparece aqui no privado (e vice-versa).
 Em breve (ainda NÃO disponível, diga que está chegando): foto de boleto virar conta a pagar, comprovante marcar conta como paga, nota fiscal virar despesa sozinha, decisões e relatórios em PDF.
 
 CATEGORIAS DE DESPESA VÁLIDAS (só estas; nunca invente outra): ${categorias.join(", ")}.

@@ -107,3 +107,37 @@ export async function agendaDe(usuarioId: string, de: string, ate: string): Prom
     return null;
   }
 }
+
+// ------------------------------------------------------------- espaços
+
+type RotaEspaco = "/espacos/drive" | "/espacos/apagar" | "/espacos/apagar-documento" | "/espacos/reler-documento";
+
+/** Pede ao robô uma ação no espaço (ele confere se a pessoa é membro/admin). */
+export async function acaoNoEspaco(caminho: RotaEspaco, corpo: Record<string, string>): Promise<ResultadoConexao> {
+  try {
+    const r = await chamar(caminho, "POST", corpo, 45_000);
+    return (await r.json()) as ResultadoConexao;
+  } catch {
+    return { ok: false, erro: "O robô está fora do ar agora. Tente de novo em instantes." };
+  }
+}
+
+/** Pergunta à memória do espaço (documentos e mensagens do grupo). */
+export async function perguntarAoEspaco(usuarioId: string, espacoId: string, pergunta: string): Promise<RespostaPergunta> {
+  try {
+    const r = await chamar("/espacos/perguntar", "POST", { usuarioId, espacoId, pergunta }, 60_000);
+    return (await r.json()) as RespostaPergunta;
+  } catch {
+    return { ok: false, erro: "O robô está fora do ar agora. Tente de novo em instantes." };
+  }
+}
+
+/** Arquivo original de um documento do espaço (o robô busca no Drive ou no cofre). */
+export async function baixarDoEspaco(usuarioId: string, espacoId: string, documentoId: string): Promise<Response | null> {
+  try {
+    const q = new URLSearchParams({ usuarioId, espacoId, documentoId });
+    return await chamar(`/espacos/arquivo?${q}`, "GET", undefined, 120_000);
+  } catch {
+    return null;
+  }
+}
