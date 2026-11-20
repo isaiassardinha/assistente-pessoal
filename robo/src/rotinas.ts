@@ -11,6 +11,7 @@ import { config, configuracoesFaltando } from "./config";
 import { log } from "./log";
 import { avisarCompromissos, cuidarDosEmails, enviarResumosDaManha } from "./pessoal";
 import { numeroPermitido } from "./regras";
+import { cuidarDasVigias } from "./vigias";
 import { conectado, enviarTexto, NumeroSemWhatsApp, reagir } from "./whatsapp";
 
 let rodando = false;
@@ -28,6 +29,7 @@ export function iniciarRotinas() {
       void rodar();
       void cuidarDoCerebro();
       if (++volta % 2 === 0) void lerEmails(); // e-mail: a cada 2 minutos
+      if (volta % 5 === 0) void vigiarPassagens(); // passagens: a cada 5 minutos
     }, 60_000);
   }, atraso);
 }
@@ -95,6 +97,12 @@ async function avisarLeitura(usuarioId: string, r: { doc: banco.Documento; ok: b
   } catch (e) {
     log.aviso("aviso de leitura não enviado:", e);
   }
+}
+
+/** Passagens: só busca se der para avisar (WhatsApp conectado). */
+async function vigiarPassagens() {
+  if (configuracoesFaltando().length > 0 || !conectado()) return;
+  await cuidarDasVigias((celular, texto) => enviarTexto(celular, texto)).catch((e) => log.erro("passagens:", e));
 }
 
 /** E-mail não depende do WhatsApp (os avisos esperam ele voltar). */

@@ -111,6 +111,21 @@ export function dataFoiDita(data: string, textosDaPessoa: string[], hoje: string
   return false;
 }
 
+const MESES = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+/** O mês da data (AAAA-MM-DD) foi dito? ("março", "mar", "/03", "mês que vem") — para janelas de datas flexíveis. */
+export function mesFoiDito(data: string, textosDaPessoa: string[], hoje: string): boolean {
+  const mes = Number(data.slice(5, 7));
+  const nome = MESES[mes - 1];
+  const textos = textosDaPessoa.map(semAcento);
+  if (textos.some((t) => new RegExp(`\\b(${nome}|${nome.slice(0, 3)})\\b`).test(t))) return true;
+  if (textos.some((t) => new RegExp(`\\d{1,2}/0?${mes}\\b`).test(t))) return true;
+  const proximo = Number(hoje.slice(5, 7)) % 12 + 1;
+  if (mes === proximo && textos.some((t) => /\b(mes que vem|proximo mes)\b/.test(t))) return true;
+  if (data.slice(0, 7) === hoje.slice(0, 7) && textos.some((t) => /\b(este mes|esse mes|neste mes|nesse mes)\b/.test(t))) return true;
+  return false;
+}
+
 /** O dia do mês (1 a 31) foi dito pela pessoa? */
 export function diaFoiDito(dia: number, textosDaPessoa: string[]): boolean {
   return textosDaPessoa.some((t) => new RegExp(`(^|[^0-9])0?${dia}([^0-9]|$)`).test(semAcento(t)));

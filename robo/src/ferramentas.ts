@@ -22,6 +22,22 @@ import {
   SemPermissaoNaAgenda,
 } from "./pessoal";
 import type { Ferramenta } from "./ia";
+import {
+  AEROPORTOS,
+  buscarDatasBaratas,
+  buscarVoos,
+  cota,
+  CotaEsgotada,
+  datasLegiveis,
+  descreverVoo,
+  ErroNaBusca,
+  horarioLegivel,
+  linkGoogleFlights,
+  passagensConfigurado,
+  PassagensNaoConfigurado,
+  rotaLegivel,
+} from "./passagens";
+import { checarVigia } from "./vigias";
 import { situacaoDaConta } from "@/lib/contas";
 import {
   categoriaFoiDita,
@@ -29,6 +45,7 @@ import {
   diaFoiDito,
   encontrarCategoria,
   horaFoiDita,
+  mesFoiDito,
   respostaAfirmativa,
   semAcento,
   textoFoiDito,
@@ -124,6 +141,55 @@ function intervalo(ctx: Contexto, periodo: unknown, de: unknown, ate: unknown) {
   return intervaloDoPeriodo(periodoBase, ctx.hoje, texto(de, 10), texto(ate, 10));
 }
 
+// ------------------------------------------------------------ passagens
+
+/** Buscas na hora por pessoa e por dia (protege a cota mensal, que é de todos). */
+const MAXIMO_BUSCAS_POR_DIA = 15;
+const buscasHoje = new Map<string, { dia: string; n: number }>();
+
+function adultos(v: unknown): number {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n >= 1 && n <= 9 ? n : 1;
+}
+
+function conferirRota(origem: unknown, destino: unknown): { origem?: string; destino?: string; problema?: string } {
+  const limpar = (v: unknown) => texto(v, 40).toUpperCase().replace(/[\s/;]+/g, ",").replace(/,+/g, ",").replace(/^,|,$/g, "");
+  const o = limpar(origem);
+  const d = limpar(destino);
+  if (!AEROPORTOS.test(o) || !AEROPORTOS.test(d))
+    return { problema: "use códigos IATA de aeroporto (ex.: GRU, MIA; vários do mesmo lugar separados por vírgula). Se não souber o lugar, pergunte." };
+  if (o === d) return { problema: "origem e destino iguais" };
+  return { origem: o, destino: d };
+}
+
+/** A duração da viagem foi dita? ("10 dias", "uma semana", "duas semanas", "15 dias") */
+export function duracaoFoiDita(dias: number, textosDaPessoa: string[]): boolean {
+  if (diaFoiDito(dias, textosDaPessoa)) return true;
+  const t = textosDaPessoa.map((x) => semAcento(x)).join(" ");
+  if (dias === 7 && /\b(uma|1) semana\b/.test(t)) return true;
+  if (dias === 14 && /\b(duas|2) semanas\b/.test(t)) return true;
+  if (dias === 15 && /\bquinzena\b/.test(t)) return true;
+  if (dias === 21 && /\b(tres|3) semanas\b/.test(t)) return true;
+  if ((dias === 30 || dias === 31) && /\b(um|1) mes\b/.test(t)) return true;
+  return false;
+}
+
+function naoConfigurado() {
+  return {
+    resultado:
+      "PASSAGENS NÃO CONFIGURADO: a busca de passagens ainda não foi ligada no servidor (falta a chave do SerpApi). " +
+      "Explique que o administrador precisa configurar e que, enquanto isso, dá para procurar direto no Google Flights.",
+  };
+}
+
+function erroDePassagem(e: unknown): { resultado: string } {
+  if (e instanceof CotaEsgotada)
+    return { resultado: "NÃO BUSCADO: a cota mensal de buscas de passagem acabou. Diga que volta no próximo ciclo e sugira o Google Flights direto." };
+  if (e instanceof PassagensNaoConfigurado) return naoConfigurado();
+  if (e instanceof ErroNaBusca) return { resultado: "NÃO BUSCADO: o serviço de passagens não respondeu agora. Peça para tentar de novo em alguns minutos." };
+  throw e;
+}
+
 export function criarFerramentas(ctx: Contexto): Ferramenta[] {
   const uid = ctx.usuario.id;
   let cacheCategorias: { id: string; nome: string }[] | null = null;
@@ -172,6 +238,32 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
       situacao: situacaoDaConta(c, ctx.hoje).texto,
       fixa: !!c.despesa_fixa_id,
     };
+  }
+
+  function conferirDataDeViagem(data: string, nome: string): string | null {
+    if (!dataValida(data)) return `data de ${nome} inválida (use AAAA-MM-DD) ou não dita`;
+    if (data < ctx.hoje) return `a data de ${nome} já passou`;
+    if (data > somarDias(ctx.hoje, 330)) return `a data de ${nome} é longe demais (o Google mostra até uns 11 meses à frente)`;
+    return null;
+  }
+
+  /** Confere se dá para gastar uma busca agora. Devolve o motivo se não der. */
+  async function podeBuscarAgora(): Promise<{ resultado: string } | null> {
+    if (!passagensConfigurado()) return naoConfigurado();
+    const uso = buscasHoje.get(uid);
+    if (uso && uso.dia === ctx.hoje && uso.n >= MAXIMO_BUSCAS_POR_DIA)
+      return { resultado: `NÃO BUSCADO: limite de ${MAXIMO_BUSCAS_POR_DIA} buscas de passagem por dia (protege a cota do mês). Amanhã libera.` };
+    try {
+      if ((await cota()).restantes <= 0) return erroDePassagem(new CotaEsgotada(""));
+    } catch (e) {
+      return erroDePassagem(e);
+    }
+    return null;
+  }
+
+  function contarBusca() {
+    const uso = buscasHoje.get(uid);
+    buscasHoje.set(uid, { dia: ctx.hoje, n: uso && uso.dia === ctx.hoje ? uso.n + 1 : 1 });
   }
 
   return [
@@ -475,6 +567,7 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
         else if (acao.tipo === "apagar_anotacoes") feitos = await banco.apagarAnotacoes(uid, acao.dados.ids);
         else if (acao.tipo === "apagar_documentos") feitos = await banco.apagarDocumentos(uid, acao.dados.ids);
         else if (acao.tipo === "cancelar_contas") feitos = await banco.cancelarContas(uid, acao.dados.ids);
+        else if (acao.tipo === "apagar_vigias") feitos = await banco.apagarVigias(uid, acao.dados.ids);
         else if (acao.tipo === "cancelar_compromissos") {
           try {
             feitos = await cancelarCompromissos(uid, acao.dados.ids.filter(idDeEventoValido));
@@ -1513,6 +1606,292 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
       executar: async (a) => {
         const n = await banco.apagarRegrasEmail(uid, ids(a.ids));
         return n ? { resultado: "APAGADA(S)", quantidade: n } : { resultado: "NÃO EXECUTADO: regra não encontrada" };
+      },
+    },
+
+    // ============================================================ passagens
+    {
+      nome: "buscar_passagens",
+      descricao:
+        "Busca passagens aéreas AGORA no Google Flights (datas fixas). origem/destino em códigos IATA de aeroporto; cidade com vários " +
+        "aeroportos: todos separados por vírgula (São Paulo = GRU,CGH,VCP; Rio = GIG,SDU; Nova York = JFK,EWR,LGA). " +
+        "Sem volta = só ida. Gasta 1 busca da cota mensal: não repita a mesma busca.",
+      parametros: {
+        type: "object",
+        properties: {
+          origem: { type: "string" },
+          destino: { type: "string" },
+          ida: { type: "string", description: "AAAA-MM-DD" },
+          volta: { type: "string", description: "AAAA-MM-DD (vazio = só ida)" },
+          adultos: { type: "integer", description: "1 a 9 (padrão 1)" },
+          so_direto: { type: "boolean", description: "só voos sem parada" },
+        },
+        required: ["origem", "destino", "ida"],
+      },
+      executar: async (a) => {
+        const rota = conferirRota(a.origem, a.destino);
+        if (rota.problema) return { resultado: `NÃO BUSCADO: ${rota.problema}` };
+        const ida = texto(a.ida, 10);
+        const volta = texto(a.volta, 10) || null;
+        const problema = conferirDataDeViagem(ida, "ida") ?? (volta ? conferirDataDeViagem(volta, "volta") : null);
+        if (problema) return { resultado: `NÃO BUSCADO: ${problema}` };
+        if (volta && volta < ida) return { resultado: "NÃO BUSCADO: a volta é antes da ida" };
+        const bloqueio = await podeBuscarAgora();
+        if (bloqueio) return bloqueio;
+        try {
+          const pedido = { origem: rota.origem!, destino: rota.destino!, ida, volta, adultos: adultos(a.adultos), soDireto: a.so_direto === true };
+          const r = await buscarVoos(pedido);
+          contarBusca();
+          if (r.voos.length === 0) return { resultado: "NENHUM VOO ENCONTRADO para essas datas e filtros", link: r.link };
+          return {
+            resultado: "ENCONTRADO",
+            rota: `${rota.origem} → ${rota.destino}`,
+            datas: volta ? `${dataCurta(ida, ctx.hoje)} a ${dataCurta(volta, ctx.hoje)} (ida e volta)` : `${dataCurta(ida, ctx.hoje)} (só ida)`,
+            adultos: pedido.adultos,
+            opcoes_mais_baratas: r.voos.slice(0, 5).map((v) => ({
+              resumo: descreverVoo(v),
+              saida: horarioLegivel(v.partida),
+              chegada: horarioLegivel(v.chegada),
+            })),
+            avaliacao_do_google: r.nivel ? `preço ${r.nivel}` : undefined,
+            faixa_normal: r.faixaTipica ? `${formatarReais(r.faixaTipica[0])} a ${formatarReais(r.faixaTipica[1])}` : undefined,
+            link_para_comprar: r.link,
+            observacao:
+              (volta ? "Preço de ida e volta. " : "") +
+              "Mostre as 3 mais baratas e o link. Diga que o preço pode mudar até a compra e ofereça criar uma vigia com preço-alvo.",
+          };
+        } catch (e) {
+          return erroDePassagem(e);
+        }
+      },
+    },
+    {
+      nome: "datas_baratas_passagem",
+      descricao:
+        "Acha as datas mais baratas numa janela (ex.: 'qual a semana mais barata para ir a Lisboa em abril?'). de/ate = primeira e última " +
+        "data de IDA possível (até 120 dias de janela). dias_viagem = duração da viagem (vazio = só ida). Gasta 1 busca.",
+      parametros: {
+        type: "object",
+        properties: {
+          origem: { type: "string" },
+          destino: { type: "string" },
+          de: { type: "string", description: "AAAA-MM-DD" },
+          ate: { type: "string", description: "AAAA-MM-DD" },
+          dias_viagem: { type: "integer", description: "1 a 60; vazio = só ida" },
+          adultos: { type: "integer" },
+          so_direto: { type: "boolean" },
+        },
+        required: ["origem", "destino", "de", "ate"],
+      },
+      executar: async (a) => {
+        const rota = conferirRota(a.origem, a.destino);
+        if (rota.problema) return { resultado: `NÃO BUSCADO: ${rota.problema}` };
+        const de = texto(a.de, 10);
+        const ate = texto(a.ate, 10);
+        const problema = conferirDataDeViagem(de, "início da janela") ?? conferirDataDeViagem(ate, "fim da janela");
+        if (problema) return { resultado: `NÃO BUSCADO: ${problema}` };
+        if (ate < de || ate > somarDias(de, 120)) return { resultado: "NÃO BUSCADO: a janela precisa ter de 1 a 120 dias" };
+        const dias = a.dias_viagem == null || a.dias_viagem === "" ? null : Math.round(Number(a.dias_viagem));
+        if (dias != null && !(dias >= 1 && dias <= 60)) return { resultado: "NÃO BUSCADO: dias de viagem entre 1 e 60" };
+        const bloqueio = await podeBuscarAgora();
+        if (bloqueio) return bloqueio;
+        try {
+          const datas = await buscarDatasBaratas({
+            origem: rota.origem!,
+            destino: rota.destino!,
+            de,
+            ate,
+            diasViagem: dias,
+            adultos: adultos(a.adultos),
+            soDireto: a.so_direto === true,
+          });
+          contarBusca();
+          if (datas.length === 0) return { resultado: "NENHUM PREÇO ENCONTRADO nessa janela" };
+          return {
+            resultado: "ENCONTRADO",
+            rota: `${rota.origem} → ${rota.destino}`,
+            tipo: dias ? `ida e volta, ${dias} dias` : "só ida",
+            datas_mais_baratas: datas.slice(0, 5).map((d) => {
+              const volta = d.volta ?? (dias ? somarDias(d.ida, dias) : null);
+              return {
+                ida: dataCurta(d.ida, ctx.hoje),
+                volta: volta ? dataCurta(volta, ctx.hoje) : undefined,
+                preco: formatarReais(d.preco),
+                link: linkGoogleFlights({ origem: rota.origem!, destino: rota.destino!, ida: d.ida, volta }),
+              };
+            }),
+            observacao: "Preços aproximados do calendário do Google; o valor exato aparece no link. Ofereça vigiar a melhor data.",
+          };
+        } catch (e) {
+          return erroDePassagem(e);
+        }
+      },
+    },
+    {
+      nome: "criar_vigia_passagem",
+      descricao:
+        "Cria uma vigia: o robô consulta o preço algumas vezes por dia e avisa no WhatsApp quando ficar abaixo do preco_alvo. " +
+        "Precisa de origem, destino, datas e preço-alvo DITOS pela pessoa. Datas fixas: ida (+ volta, ou so_ida). " +
+        "Datas flexíveis: ida = primeira data e ida_ate = última data possível de saída, com dias_viagem (ou so_ida). " +
+        "descricao: rota em palavras, ex.: 'São Paulo → Miami'. Já faz a primeira consulta na hora.",
+      parametros: {
+        type: "object",
+        properties: {
+          origem: { type: "string" },
+          destino: { type: "string" },
+          descricao: { type: "string" },
+          ida: { type: "string", description: "AAAA-MM-DD" },
+          volta: { type: "string", description: "AAAA-MM-DD (datas fixas)" },
+          ida_ate: { type: "string", description: "AAAA-MM-DD (só datas flexíveis)" },
+          dias_viagem: { type: "integer", description: "datas flexíveis de ida e volta" },
+          so_ida: { type: "boolean" },
+          adultos: { type: "integer" },
+          so_direto: { type: "boolean" },
+          preco_alvo: { type: "number", description: "em reais" },
+        },
+        required: ["origem", "destino", "ida", "preco_alvo"],
+      },
+      executar: async (a) => {
+        const rota = conferirRota(a.origem, a.destino);
+        if (rota.problema) return { resultado: `NÃO GRAVADO: ${rota.problema}` };
+        const alvo = numero(a.preco_alvo);
+        if (!alvo) return { resultado: "NÃO GRAVADO: falta o preço-alvo. Pergunte até quanto a pessoa quer pagar." };
+        if (!valorFoiDito(alvo, ctx.textosDaPessoa))
+          return { resultado: `NÃO GRAVADO: a pessoa não disse o preço-alvo ${formatarReais(alvo)}. Pergunte até quanto ela quer pagar.` };
+        const ida = texto(a.ida, 10);
+        const idaAte = texto(a.ida_ate, 10) || null;
+        const soIda = a.so_ida === true;
+        const volta = soIda || idaAte ? null : texto(a.volta, 10) || null;
+        const dias = idaAte && !soIda && a.dias_viagem != null && a.dias_viagem !== "" ? Math.round(Number(a.dias_viagem)) : null;
+
+        const problema = conferirDataDeViagem(ida, "ida") ?? (idaAte ? conferirDataDeViagem(idaAte, "fim da janela") : null) ?? (volta ? conferirDataDeViagem(volta, "volta") : null);
+        if (problema) return { resultado: `NÃO GRAVADO: ${problema}` };
+        if (!soIda && !idaAte && !volta) return { resultado: "NÃO GRAVADO: é só ida ou ida e volta? Se for ida e volta, pergunte a data da volta." };
+        if (volta && volta < ida) return { resultado: "NÃO GRAVADO: a volta é antes da ida" };
+        if (idaAte && (idaAte < ida || idaAte > somarDias(ida, 120))) return { resultado: "NÃO GRAVADO: a janela de saída precisa ter de 1 a 120 dias" };
+        if (idaAte && !soIda && !(dias != null && dias >= 1 && dias <= 60))
+          return { resultado: "NÃO GRAVADO: com datas flexíveis, pergunte quantos dias de viagem (ou se é só ida)" };
+        if (dias != null && !duracaoFoiDita(dias, ctx.textosDaPessoa))
+          return { resultado: `NÃO GRAVADO: a pessoa não disse a duração de ${dias} dias. Pergunte quantos dias de viagem.` };
+        // datas precisam ter sido ditas (janela flexível: basta o mês)
+        const ditas = idaAte
+          ? [ida, idaAte].every((d) => dataFoiDita(d, ctx.textosDaPessoa, ctx.hoje) || mesFoiDito(d, ctx.textosDaPessoa, ctx.hoje))
+          : [ida, ...(volta ? [volta] : [])].every((d) => dataFoiDita(d, ctx.textosDaPessoa, ctx.hoje));
+        if (!ditas) return { resultado: "NÃO GRAVADO: a pessoa não disse essas datas. Pergunte as datas da viagem." };
+        if (!passagensConfigurado()) return naoConfigurado();
+
+        let vigia: banco.VigiaPassagem;
+        try {
+          vigia = await banco.criarVigia(uid, {
+            origem: rota.origem!,
+            destino: rota.destino!,
+            descricao: texto(a.descricao, 120) || null,
+            ida,
+            ida_ate: idaAte,
+            volta,
+            dias_viagem: dias,
+            so_ida: soIda,
+            adultos: adultos(a.adultos),
+            so_direto: a.so_direto === true,
+            preco_alvo: alvo,
+          });
+        } catch (e) {
+          if (e instanceof banco.LimiteDeVigias) return { resultado: "NÃO GRAVADO: já existem 10 vigias ativas. Ofereça pausar ou apagar alguma." };
+          throw e;
+        }
+        const gravada = {
+          rota: rotaLegivel(vigia),
+          datas: datasLegiveis(vigia),
+          adultos: vigia.adultos,
+          so_direto: vigia.so_direto,
+          preco_alvo: formatarReais(alvo),
+        };
+        // primeira consulta agora (se a cota permitir)
+        if (await podeBuscarAgora()) return { resultado: "GRAVADO", vigia: gravada, preco_agora: "não consultado agora (cota apertada); a rotina consulta depois" };
+        try {
+          const r = await checarVigia(uid, vigia, async () => true); // o aviso vai na própria resposta
+          contarBusca();
+          return {
+            resultado: "GRAVADO",
+            vigia: gravada,
+            preco_agora: r.preco == null ? "nenhum voo encontrado agora" : formatarReais(r.preco),
+            detalhe: r.texto || undefined,
+            ja_abaixo_do_alvo: r.preco != null && r.preco <= alvo,
+            link: r.link || undefined,
+            observacao:
+              "Confirme a vigia. Explique que o robô confere algumas vezes por dia (entre 7h e 22h) e avisa quando ficar abaixo do alvo; " +
+              "se já estiver abaixo, diga isso agora e mande o link.",
+          };
+        } catch {
+          // a vigia já está gravada: a rotina consulta depois
+          return { resultado: "GRAVADO", vigia: gravada, preco_agora: "não deu para consultar agora; a rotina tenta de novo mais tarde" };
+        }
+      },
+    },
+    {
+      nome: "listar_vigias_passagem",
+      descricao: "Lista as vigias de passagem (com id, alvo, último preço, menor preço visto e situação). todas=true inclui pausadas e encerradas.",
+      parametros: { type: "object", properties: { todas: { type: "boolean" } } },
+      executar: async (a) => {
+        const lista = await banco.vigiasDe(uid, { ativas: a.todas !== true });
+        return {
+          quantidade: lista.length,
+          vigias: lista.map((v) => ({
+            id: v.id,
+            rota: rotaLegivel(v),
+            datas: datasLegiveis(v),
+            alvo: formatarReais(v.preco_alvo),
+            ultimo_preco: v.ultimo_preco != null ? formatarReais(v.ultimo_preco) : v.ultima_busca ? "nenhum voo na última consulta" : "ainda não consultado",
+            consultado_em: v.ultima_busca ? quandoLegivel(v.ultima_busca) : undefined,
+            menor_preco_visto: v.menor_preco != null ? formatarReais(v.menor_preco) : undefined,
+            situacao: v.ativa ? (v.erro ? `ativa (última consulta deu erro)` : "ativa") : v.encerrada_motivo ? `encerrada: ${v.encerrada_motivo}` : "pausada",
+          })),
+        };
+      },
+    },
+    {
+      nome: "mudar_vigia_passagem",
+      descricao: "Muda o preço-alvo de uma vigia ou pausa/reativa (id de listar_vigias_passagem). Para mudar rota ou datas: crie outra e apague a antiga.",
+      parametros: {
+        type: "object",
+        properties: { id: { type: "string" }, preco_alvo: { type: "number" }, ativa: { type: "boolean" } },
+        required: ["id"],
+      },
+      executar: async (a) => {
+        const id = texto(a.id, 40);
+        if (!UUID.test(id)) return { resultado: "NÃO GRAVADO: vigia não encontrada" };
+        const campos: { preco_alvo?: number; ativa?: boolean } = {};
+        if (a.preco_alvo != null) {
+          const alvo = numero(a.preco_alvo);
+          if (!alvo || !valorFoiDito(alvo, ctx.textosDaPessoa)) return { resultado: "NÃO GRAVADO: pergunte o novo preço-alvo" };
+          campos.preco_alvo = alvo;
+        }
+        if (typeof a.ativa === "boolean") campos.ativa = a.ativa;
+        if (Object.keys(campos).length === 0) return { resultado: "NÃO GRAVADO: nada para mudar" };
+        try {
+          const v = await banco.editarVigia(uid, id, campos);
+          if (!v) return { resultado: "NÃO GRAVADO: vigia não encontrada, ou a data da viagem já passou (não dá para reativar)" };
+          return { resultado: "GRAVADO", vigia: { rota: rotaLegivel(v), datas: datasLegiveis(v), alvo: formatarReais(v.preco_alvo), ativa: v.ativa } };
+        } catch (e) {
+          if (e instanceof banco.LimiteDeVigias) return { resultado: "NÃO GRAVADO: já existem 10 vigias ativas" };
+          throw e;
+        }
+      },
+    },
+    {
+      nome: "apagar_vigias_passagem",
+      descricao: "Apaga vigias de passagem (ids de listar_vigias_passagem). Uma: na hora. Várias: pede confirmação. Para só parar por um tempo, use mudar_vigia_passagem com ativa=false.",
+      parametros: { type: "object", properties: { ids: { type: "array", items: { type: "string" } } }, required: ["ids"] },
+      executar: async (a) => {
+        const lista = await banco.vigiasPorIds(uid, ids(a.ids));
+        if (lista.length === 0) return { resultado: "NÃO EXECUTADO: nenhuma vigia com esses ids" };
+        const descricoes = lista.map((v) => `${rotaLegivel(v)} (${datasLegiveis(v)})`);
+        if (lista.length === 1) {
+          await banco.apagarVigias(uid, [lista[0].id]);
+          return { resultado: "APAGADA", vigia: descricoes[0] };
+        }
+        await banco.salvarAcaoPendente(uid, "apagar_vigias", { ids: lista.map((v) => v.id), descricao: descricoes });
+        return { resultado: "AGUARDANDO CONFIRMAÇÃO (nada mudou ainda)", itens: descricoes, instrucao: 'Liste e pergunte "Confirma?"' };
       },
     },
   ];

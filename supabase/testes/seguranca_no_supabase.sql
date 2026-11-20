@@ -941,6 +941,78 @@ select testes.deve_bloquear('select id from public.espaco_mensagens', 'visitante
 select testes.como_dono_do_banco();
 
 -- ---------------------------------------------------------------------
+-- 10b. VIGIAS DE PASSAGEM
+-- ---------------------------------------------------------------------
+select testes.como_dono_do_banco();
+insert into public.vigias_passagem (id, usuario_id, origem, destino, ida, volta, preco_alvo) values
+  ('00000000-0000-4000-b500-000000000001', '00000000-0000-4000-a000-00000000b001', 'GRU', 'MIA',
+   privado.hoje_sp() + 60, privado.hoje_sp() + 70, 3000);
+insert into public.precos_passagem (vigia_id, usuario_id, preco) values
+  ('00000000-0000-4000-b500-000000000001', '00000000-0000-4000-a000-00000000b001', 3200);
+
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.ok((select count(*) from public.vigias_passagem) = 0, 'Ana não vê as vigias do Bruno');
+select testes.ok((select count(*) from public.precos_passagem) = 0, 'Ana não vê o histórico de preços do Bruno');
+select testes.ok(testes.linhas($q$update public.vigias_passagem set ativa = false$q$) = 0, 'Ana não pausa a vigia do Bruno');
+select testes.ok(testes.linhas($q$delete from public.vigias_passagem$q$) = 0, 'Ana não apaga a vigia do Bruno');
+select testes.deve_bloquear(
+  $q$insert into public.vigias_passagem (usuario_id, origem, destino, ida, so_ida, preco_alvo)
+     values ('00000000-0000-4000-a000-00000000b001', 'GRU', 'LIS', privado.hoje_sp() + 30, true, 2500)$q$,
+  'Ana não cria vigia para o Bruno');
+select testes.ok(
+  testes.linhas($q$insert into public.vigias_passagem (id, usuario_id, origem, destino, ida, so_ida, preco_alvo)
+     values ('00000000-0000-4000-a500-000000000001', '00000000-0000-4000-a000-00000000a001', 'GRU,CGH', 'LIS', privado.hoje_sp() + 30, true, 2500)$q$) = 1,
+  'Ana cria a vigia dela (só ida, vários aeroportos)');
+select testes.deve_bloquear(
+  $q$update public.vigias_passagem set ultimo_preco = 1, menor_preco = 1 where id = '00000000-0000-4000-a500-000000000001'$q$,
+  'Ana não escreve o preço (só o robô)');
+select testes.deve_bloquear(
+  $q$update public.vigias_passagem set ida = privado.hoje_sp() + 1 where id = '00000000-0000-4000-a500-000000000001'$q$,
+  'Ana não muda a rota/data depois de criada (cria outra)');
+select testes.deve_bloquear(
+  $q$insert into public.precos_passagem (vigia_id, usuario_id, preco) values ('00000000-0000-4000-a500-000000000001', '00000000-0000-4000-a000-00000000a001', 1)$q$,
+  'Ana não grava preço falso no histórico');
+select testes.deve_bloquear(
+  $q$insert into public.vigias_passagem (usuario_id, origem, destino, ida, preco_alvo)
+     values ('00000000-0000-4000-a000-00000000a001', 'GRU', 'MIA', privado.hoje_sp() + 30, 3000)$q$,
+  'ida e volta sem data de volta não é aceita');
+select testes.deve_bloquear(
+  $q$insert into public.vigias_passagem (usuario_id, origem, destino, ida, so_ida, preco_alvo)
+     values ('00000000-0000-4000-a000-00000000a001', 'GRU', 'MIA', privado.hoje_sp() - 1, true, 3000)$q$,
+  'vigia com data que já passou não é aceita');
+select testes.deve_bloquear(
+  $q$insert into public.vigias_passagem (usuario_id, origem, destino, ida, so_ida, preco_alvo)
+     values ('00000000-0000-4000-a000-00000000a001', 'gru; drop', 'MIA', privado.hoje_sp() + 5, true, 3000)$q$,
+  'código de aeroporto inválido não é aceito');
+select testes.ok(
+  testes.linhas($q$update public.vigias_passagem set preco_alvo = 2200, ativa = false where id = '00000000-0000-4000-a500-000000000001'$q$) = 1,
+  'Ana muda o alvo e pausa a vigia dela');
+select testes.deve_bloquear('select public.vigias_para_checar(10)', 'Ana não usa a fila de vigias do robô');
+select testes.deve_bloquear('select public.encerrar_vigias_vencidas()', 'Ana não encerra vigias');
+
+select testes.como_dono_do_banco();
+insert into public.vigias_passagem (usuario_id, origem, destino, ida, so_ida, preco_alvo)
+  select '00000000-0000-4000-a000-00000000a001', 'GRU', 'MIA', privado.hoje_sp() + n, true, 3000 from generate_series(1, 10) n;
+select testes.deve_bloquear(
+  $q$insert into public.vigias_passagem (usuario_id, origem, destino, ida, so_ida, preco_alvo)
+     values ('00000000-0000-4000-a000-00000000a001', 'GRU', 'MIA', privado.hoje_sp() + 20, true, 3000)$q$,
+  'no máximo 10 vigias ativas por pessoa');
+select testes.deve_bloquear(
+  $q$update public.vigias_passagem set ativa = true where id = '00000000-0000-4000-a500-000000000001'$q$,
+  'reativar também respeita o limite de 10');
+delete from public.vigias_passagem where usuario_id = '00000000-0000-4000-a000-00000000a001' and origem = 'GRU' and destino = 'MIA';
+
+select testes.como_servidor();
+update public.vigias_passagem set ultima_busca = now() - interval '1 day', ida = privado.hoje_sp() - 1, volta = privado.hoje_sp() - 1
+ where id = '00000000-0000-4000-b500-000000000001';
+select testes.ok(public.encerrar_vigias_vencidas() = 1, 'robô encerra a vigia cuja data passou');
+select testes.ok(
+  (select not ativa and encerrada_motivo is not null from public.vigias_passagem where id = '00000000-0000-4000-b500-000000000001'),
+  'vigia encerrada fica guardada com o motivo');
+select testes.ok(public.buscas_de_vigia_hoje() = 1, 'robô conta as buscas de hoje');
+select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa
 -- ---------------------------------------------------------------------
 delete from auth.users where id = '00000000-0000-4000-a000-00000000b001';

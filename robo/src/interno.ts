@@ -16,6 +16,7 @@ import { redirectUriValido } from "./googleAgenda";
 import { compromissosDe, conectarAgenda, conectarGmail, conectarGoogleAgenda, ConexaoInvalida } from "./pessoal";
 import { acordarCerebro } from "./rotinas";
 import { apagarDocumentos, apagarEspaco, ArquivoIndisponivel, baixarDocumento, buscarNoEspaco, conectarDriveEspaco } from "./espacos";
+import { situacaoPassagens } from "./passagens";
 import { comUso } from "./uso";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
 
@@ -118,7 +119,14 @@ export function iniciarApiInterna() {
 
       if (rota === "GET /saude") {
         const e = estadoWhatsApp();
-        return json(res, 200, { ok: true, versao: versao(), whatsapp: e.situacao, faltando: configuracoesFaltando(), ia: resultadoAutoteste() });
+        return json(res, 200, {
+          ok: true,
+          versao: versao(),
+          whatsapp: e.situacao,
+          faltando: configuracoesFaltando(),
+          ia: resultadoAutoteste(),
+          passagens: await situacaoPassagens(),
+        });
       }
       if (!autorizado(req)) return json(res, 401, { ok: false, erro: "não autorizado" });
 

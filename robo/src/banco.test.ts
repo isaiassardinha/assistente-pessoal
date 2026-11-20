@@ -25,6 +25,8 @@ const TABELAS_PESSOAIS = [
   "emails",
   "regras_email",
   "avisos_agenda",
+  "vigias_passagem",
+  "precos_passagem",
 ];
 
 // Funções que leem perfis/avisos pelo próprio servidor (não são dados de um usuário específico)

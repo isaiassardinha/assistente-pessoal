@@ -1635,3 +1635,157 @@ export async function buscarTrechosEspaco(espacoId: string, vetor: number[], lim
   falhou("buscar trechos do espaço", error);
   return (data ?? []) as TrechoAchadoEspaco[];
 }
+
+// ================================================================ passagens
+
+export type VigiaPassagem = {
+  id: string;
+  origem: string;
+  destino: string;
+  descricao: string | null;
+  ida: string;
+  ida_ate: string | null;
+  volta: string | null;
+  dias_viagem: number | null;
+  so_ida: boolean;
+  adultos: number;
+  so_direto: boolean;
+  preco_alvo: number;
+  ativa: boolean;
+  encerrada_motivo: string | null;
+  ultimo_preco: number | null;
+  ultima_busca: string | null;
+  menor_preco: number | null;
+  abaixo_do_alvo: boolean;
+  ultimo_aviso_preco: number | null;
+  erro: string | null;
+};
+
+export type NovaVigia = Pick<
+  VigiaPassagem,
+  "origem" | "destino" | "descricao" | "ida" | "ida_ate" | "volta" | "dias_viagem" | "so_ida" | "adultos" | "so_direto" | "preco_alvo"
+>;
+
+const CAMPOS_VIGIA =
+  "id, origem, destino, descricao, ida, ida_ate, volta, dias_viagem, so_ida, adultos, so_direto, preco_alvo, ativa, " +
+  "encerrada_motivo, ultimo_preco, ultima_busca, menor_preco, abaixo_do_alvo, ultimo_aviso_preco, erro";
+
+function vigiaDoBanco(v: Record<string, unknown>): VigiaPassagem {
+  const n = (x: unknown) => (x == null ? null : Number(x));
+  return { ...(v as VigiaPassagem), preco_alvo: Number(v.preco_alvo), ultimo_preco: n(v.ultimo_preco), menor_preco: n(v.menor_preco), ultimo_aviso_preco: n(v.ultimo_aviso_preco) };
+}
+
+export class LimiteDeVigias extends Error {}
+
+export async function criarVigia(usuarioId: string, v: NovaVigia): Promise<VigiaPassagem> {
+  const { data, error } = await db()
+    .from("vigias_passagem")
+    .insert({ ...v, usuario_id: usuarioId })
+    .select(CAMPOS_VIGIA)
+    .single();
+  if (error && /limite de 10/.test(error.message)) throw new LimiteDeVigias();
+  falhou("criar vigia", error);
+  return vigiaDoBanco(data as unknown as Record<string, unknown>);
+}
+
+export async function vigiasDe(usuarioId: string, opcoes: { ativas?: boolean } = {}): Promise<VigiaPassagem[]> {
+  let q = db().from("vigias_passagem").select(CAMPOS_VIGIA).eq("usuario_id", usuarioId).order("criado_em");
+  if (opcoes.ativas) q = q.eq("ativa", true);
+  const { data, error } = await q.limit(50);
+  falhou("vigias", error);
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map(vigiaDoBanco);
+}
+
+export async function vigiasPorIds(usuarioId: string, ids: string[]): Promise<VigiaPassagem[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await db().from("vigias_passagem").select(CAMPOS_VIGIA).eq("usuario_id", usuarioId).in("id", ids);
+  falhou("vigias por id", error);
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map(vigiaDoBanco);
+}
+
+export async function editarVigia(usuarioId: string, id: string, campos: { ativa?: boolean; preco_alvo?: number }): Promise<VigiaPassagem | null> {
+  const { data, error } = await db()
+    .from("vigias_passagem")
+    .update(campos)
+    .eq("usuario_id", usuarioId)
+    .eq("id", id)
+    .select(CAMPOS_VIGIA)
+    .maybeSingle();
+  if (error && /limite de 10/.test(error.message)) throw new LimiteDeVigias();
+  if (error && /já passou/.test(error.message)) return null;
+  falhou("editar vigia", error);
+  return data ? vigiaDoBanco(data as unknown as Record<string, unknown>) : null;
+}
+
+export async function apagarVigias(usuarioId: string, ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const { data, error } = await db().from("vigias_passagem").delete().eq("usuario_id", usuarioId).in("id", ids).select("id");
+  falhou("apagar vigias", error);
+  return data?.length ?? 0;
+}
+
+/** Grava o resultado de uma busca (histórico + situação da vigia). */
+export async function registrarBuscaDaVigia(
+  usuarioId: string,
+  vigia: VigiaPassagem,
+  r: { preco: number | null; detalhe: Record<string, unknown> | null; erro?: string | null; abaixo: boolean; avisou: boolean },
+): Promise<void> {
+  const agora = new Date().toISOString();
+  if (!r.erro) {
+    const { error } = await db()
+      .from("precos_passagem")
+      .insert({ vigia_id: vigia.id, usuario_id: usuarioId, preco: r.preco, detalhe: r.detalhe });
+    falhou("histórico de preço", error);
+  }
+  const campos: Record<string, unknown> = { ultima_busca: agora, erro: r.erro ? r.erro.slice(0, 300) : null };
+  if (!r.erro) {
+    campos.ultimo_preco = r.preco;
+    campos.ultimo_detalhe = r.detalhe;
+    campos.abaixo_do_alvo = r.abaixo;
+    if (r.preco != null && (vigia.menor_preco == null || r.preco < vigia.menor_preco)) {
+      campos.menor_preco = r.preco;
+      campos.menor_preco_em = agora;
+    }
+    if (r.avisou) {
+      campos.ultimo_aviso_preco = r.preco;
+      campos.ultimo_aviso_em = agora;
+    }
+  }
+  const { error } = await db().from("vigias_passagem").update(campos).eq("usuario_id", usuarioId).eq("id", vigia.id);
+  falhou("atualizar vigia", error);
+}
+
+/** Últimos preços encontrados (para dizer se o preço de agora está bom). */
+export async function historicoDePrecos(usuarioId: string, vigiaId: string, limite = 60): Promise<{ preco: number; buscado_em: string }[]> {
+  const { data, error } = await db()
+    .from("precos_passagem")
+    .select("preco, buscado_em")
+    .eq("usuario_id", usuarioId)
+    .eq("vigia_id", vigiaId)
+    .not("preco", "is", null)
+    .order("buscado_em", { ascending: false })
+    .limit(limite);
+  falhou("histórico de preços", error);
+  return (data ?? []).map((p) => ({ preco: Number(p.preco), buscado_em: p.buscado_em as string }));
+}
+
+// filas da rotina (todas as pessoas; o trabalho em si usa as funções acima, com o dono)
+
+export async function vigiasParaChecar(limite: number): Promise<{ id: string; usuario_id: string; celular: string }[]> {
+  if (limite <= 0) return [];
+  const { data, error } = await db().rpc("vigias_para_checar", { p_limite: limite, p_intervalo_horas: 12 });
+  falhou("fila de vigias", error);
+  return (data ?? []) as { id: string; usuario_id: string; celular: string }[];
+}
+
+export async function buscasDeVigiaHoje(): Promise<number> {
+  const { data, error } = await db().rpc("buscas_de_vigia_hoje");
+  falhou("buscas de hoje", error);
+  return Number(data ?? 0);
+}
+
+export async function encerrarVigiasVencidas(): Promise<number> {
+  const { data, error } = await db().rpc("encerrar_vigias_vencidas");
+  falhou("encerrar vigias", error);
+  return Number(data ?? 0);
+}

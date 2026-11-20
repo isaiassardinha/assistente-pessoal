@@ -34,6 +34,14 @@ decisões, documentos e relatórios. Cada pessoa só vê os próprios dados.
   - todo acesso ao banco em `robo/src/banco.ts`, sempre filtrado pelo dono (teste automático confere)
   - testes: `cd robo && npm test`
 
+- **Passagens aéreas** (Google Flights pelo SerpApi; chave `SERPAPI_KEY`)
+  - WhatsApp: buscar voos com datas fixas, achar as datas mais baratas numa janela
+  - vigias com preço-alvo: o robô consulta algumas vezes por dia (7h–22h) e avisa abaixo do alvo;
+    avisa de novo só se cair mais 5% ou se voltar para cima e cair de novo; encerra quando a data passa
+  - cota mensal dividida pelos dias que faltam, com reserva para as buscas na hora; até 15 buscas por pessoa por dia
+  - site: menu Passagens (criar, mudar alvo, pausar, apagar, histórico de preços)
+  - testes: `robo/src/passagens.test.ts`, `robo/src/ferramentasPassagens.test.ts`, seção 10b dos testes de segurança
+
 ## Rodar os testes de segurança
 
 - No computador/servidor com Postgres: `bash scripts/testar-banco.sh`

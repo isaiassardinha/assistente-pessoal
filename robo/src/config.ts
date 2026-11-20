@@ -21,6 +21,8 @@ export const config = {
   /** Login do Google para a agenda (criado pela pessoa no Google Cloud). */
   googleClientId: opcional("GOOGLE_CLIENT_ID"),
   googleClientSecret: opcional("GOOGLE_CLIENT_SECRET"),
+  /** Busca de passagens (Google Flights pelo SerpApi). Opcional. */
+  serpapiChave: opcional("SERPAPI_KEY"),
   portaInterna: Number(opcional("ROBO_PORTA") || 3001),
   /** Pasta que guarda a sessão do WhatsApp (fica entre as versões). */
   pastaDados: opcional("PASTA_DADOS") || path.resolve("dados"),

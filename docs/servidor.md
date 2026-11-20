@@ -98,5 +98,11 @@ A sessão do WhatsApp fica guardada em `/home/assistente/dados` e sobrevive às
 publicações e reinícios. Se o WhatsApp desconectar pelo celular, o robô apaga a
 sessão e um QR Code novo aparece na página.
 
+**Passagens aéreas (opcional):** `assistente-configurar SERPAPI_KEY` — chave da
+conta do SerpApi (serpapi.com → Dashboard → Your Private API Key). Sem ela, o robô
+explica que a busca de passagens não está ligada. A cota do mês é dividida entre as
+vigias (com uma reserva para as buscas feitas na hora) e `/api/saude` mostra
+quantas buscas restam.
+
 **Modo "só números liberados":** `assistente-configurar NUMEROS_PERMITIDOS`
 (números com DDI, separados por vírgula; vazio = todos os aprovados).

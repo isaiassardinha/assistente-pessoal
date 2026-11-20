@@ -193,6 +193,36 @@ export type EmailResumo = {
 
 export type RegraEmail = { id: string; usuario_id: string; tipo: "importante" | "ignorar"; padrao: string; criado_em: string };
 
+export type VigiaPassagem = {
+  id: string;
+  usuario_id: string;
+  origem: string;
+  destino: string;
+  descricao: string | null;
+  ida: string;
+  ida_ate: string | null;
+  volta: string | null;
+  dias_viagem: number | null;
+  so_ida: boolean;
+  adultos: number;
+  so_direto: boolean;
+  preco_alvo: number;
+  ativa: boolean;
+  encerrada_motivo: string | null;
+  ultimo_preco: number | null;
+  ultimo_detalhe: Record<string, unknown> | null;
+  ultima_busca: string | null;
+  menor_preco: number | null;
+  menor_preco_em: string | null;
+  abaixo_do_alvo: boolean;
+  ultimo_aviso_preco: number | null;
+  ultimo_aviso_em: string | null;
+  erro: string | null;
+  criado_em: string;
+};
+
+export type PrecoPassagem = { id: number; vigia_id: string; usuario_id: string; buscado_em: string; preco: number | null; detalhe: Record<string, unknown> | null };
+
 export type Espaco = {
   id: string;
   nome: string;
@@ -251,6 +281,8 @@ export type Database = {
       conexoes: Tabela<Conexao>;
       emails: Tabela<EmailResumo>;
       regras_email: Tabela<RegraEmail>;
+      vigias_passagem: Tabela<VigiaPassagem>;
+      precos_passagem: Tabela<PrecoPassagem>;
       espacos: Tabela<Espaco>;
       espaco_membros: Tabela<EspacoMembro>;
       espaco_documentos: Tabela<EspacoDocumento>;

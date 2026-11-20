@@ -26,6 +26,7 @@ VARIAVEIS=(
 OPCIONAIS=(
   "NUMEROS_PERMITIDOS|n|Opcional. Números com DDI separados por vírgula (ex.: 5511999998888). Vazio = todos os aprovados.|^[0-9,]*$"
   "GOOGLE_CLIENT_ID|n|Google Cloud > Google Auth Platform > Clientes > ID do cliente (termina em .apps.googleusercontent.com)|^[0-9]+-[a-z0-9]+\\.apps\\.googleusercontent\\.com$"
+  "SERPAPI_KEY|s|Busca de passagens. serpapi.com > entrar > Dashboard > Your Private API Key (64 letras e números)|^[a-f0-9]{64}$"
   "GOOGLE_CLIENT_SECRET|s|Google Cloud > Google Auth Platform > Clientes > Chave secreta do cliente (começa com GOCSPX-)|^GOCSPX-[A-Za-z0-9_-]{20,60}$"
 )
 
