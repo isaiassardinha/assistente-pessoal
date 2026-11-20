@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LinkBotao } from "@/components/ui";
 import { obterSessao } from "@/lib/auth/sessao";
 
@@ -49,6 +50,11 @@ export default async function Inicio() {
           </div>
         ))}
       </section>
+      <footer className="pb-10 text-center text-sm text-zinc-500">
+        <Link href="/privacidade" className="hover:underline">
+          Política de privacidade
+        </Link>
+      </footer>
     </main>
   );
 }
