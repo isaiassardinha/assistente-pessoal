@@ -15,7 +15,7 @@ export const config = {
   geminiModelo: opcional("GEMINI_MODELO") || "gemini-3.1-flash-lite",
   /** Voz das respostas em áudio (Gemini TTS). */
   geminiVozModelo: opcional("GEMINI_VOZ_MODELO") || "gemini-3.1-flash-tts-preview",
-  geminiVoz: opcional("GEMINI_VOZ") || "Kore",
+  geminiVoz: opcional("GEMINI_VOZ") || "Charon",
   siteUrl: opcional("SITE_URL").replace(/\/+$/, ""),
   /** Senha interna entre o site e o robô (gerada no servidor). */
   tokenInterno: opcional("INTERNO_TOKEN"),
