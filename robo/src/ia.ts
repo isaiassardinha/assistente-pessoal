@@ -142,6 +142,38 @@ export async function transcreverAudio(audio: Buffer, mime: string): Promise<str
   }
 }
 
+/**
+ * Voz: transforma o texto em fala (Gemini TTS). Devolve áudio PCM 16 bits
+ * mono e a taxa de amostragem. Tenta o modelo configurado e, se ele não
+ * existir mais, um modelo de voz mais antigo.
+ */
+export async function falar(texto: string): Promise<{ pcm: Buffer; taxa: number }> {
+  const modelos = [...new Set([config.geminiVozModelo, "gemini-2.5-flash-preview-tts"])];
+  let ultimoErro: unknown;
+  for (const modelo of modelos) {
+    try {
+      const resposta = await ia().models.generateContent({
+        model: modelo,
+        contents: [{ role: "user", parts: [{ text: `Fale em português do Brasil, em tom natural, simpático e no ritmo de uma conversa: ${texto}` }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.geminiVoz } } },
+        },
+      });
+      registrarUso("voz", modelo, usoDaResposta(resposta));
+      const parte = resposta.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+      if (!parte?.inlineData?.data) throw new Error("a voz veio vazia");
+      const taxa = Number(/rate=(\d+)/.exec(parte.inlineData.mimeType ?? "")?.[1] ?? 24000);
+      return { pcm: Buffer.from(parte.inlineData.data, "base64"), taxa };
+    } catch (e) {
+      ultimoErro = e;
+      const msg = String((e as Error)?.message ?? e);
+      if (!/not found|404|not supported|unknown model/i.test(msg)) break; // só troca de modelo se este não existir
+    }
+  }
+  throw traduzirErro(ultimoErro);
+}
+
 // =====================================================================
 // CÉREBRO: ler arquivos, gerar vetores (busca pelo sentido) e responder
 // =====================================================================

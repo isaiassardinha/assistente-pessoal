@@ -34,9 +34,13 @@ export type Usuario = {
   nome_assistente: string;
   celular: string;
   is_admin: boolean;
+  /** nunca | quando_audio | sempre */
+  respostas_em_audio?: ModoAudio;
 };
 
-const CAMPOS_USUARIO = "id, nome, nome_assistente, celular, is_admin";
+export type ModoAudio = "nunca" | "quando_audio" | "sempre";
+
+const CAMPOS_USUARIO = "id, nome, nome_assistente, celular, is_admin, respostas_em_audio";
 
 /** Quem mandou a mensagem: só cadastro aprovado e com celular verificado. */
 export async function acharUsuarioPorCelular(digitos: string): Promise<Usuario | null> {
@@ -1788,4 +1792,11 @@ export async function encerrarVigiasVencidas(): Promise<number> {
   const { data, error } = await db().rpc("encerrar_vigias_vencidas");
   falhou("encerrar vigias", error);
   return Number(data ?? 0);
+}
+
+// ================================================================ respostas em áudio
+
+export async function definirRespostasEmAudio(usuarioId: string, modo: ModoAudio): Promise<void> {
+  const { error } = await db().from("perfis").update({ respostas_em_audio: modo }).eq("id", usuarioId);
+  falhou("respostas em áudio", error);
 }

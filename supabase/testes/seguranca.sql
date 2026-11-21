@@ -1009,6 +1009,21 @@ select testes.ok(public.buscas_de_vigia_hoje() = 1, 'robô conta as buscas de ho
 select testes.como_dono_do_banco();
 
 -- ---------------------------------------------------------------------
+-- 10c. RESPOSTAS EM ÁUDIO
+-- ---------------------------------------------------------------------
+select testes.como('00000000-0000-4000-a000-00000000a001');
+select testes.ok(
+  testes.linhas($q$update public.perfis set respostas_em_audio = 'sempre' where id = '00000000-0000-4000-a000-00000000a001'$q$) = 1,
+  'Ana escolhe receber respostas em áudio');
+select testes.deve_bloquear(
+  $q$update public.perfis set respostas_em_audio = 'gritando' where id = '00000000-0000-4000-a000-00000000a001'$q$,
+  'opção de áudio inválida não é aceita');
+select testes.ok(
+  testes.linhas($q$update public.perfis set respostas_em_audio = 'nunca' where id = '00000000-0000-4000-a000-00000000b001'$q$) = 0,
+  'Ana não muda a preferência de áudio do Bruno');
+select testes.como_dono_do_banco();
+
+-- ---------------------------------------------------------------------
 -- 11. EXCLUIR CONTA (LGPD): apaga tudo da pessoa
 -- ---------------------------------------------------------------------
 delete from auth.users where id = '00000000-0000-4000-a000-00000000b001';

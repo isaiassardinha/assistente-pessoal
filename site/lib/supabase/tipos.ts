@@ -29,6 +29,7 @@ export type Perfil = {
   resumo_manha_hora: number;
   silencio_inicio: number;
   silencio_fim: number;
+  respostas_em_audio: "nunca" | "quando_audio" | "sempre";
   ultimo_resumo_em: string | null;
   aprovado_em: string | null;
   criado_em: string;

@@ -13,7 +13,8 @@ import { log } from "./log";
 import { LimitadorPorMinuto, limitarEmojis, numeroPermitido } from "./regras";
 import { acordarCerebro } from "./rotinas";
 import { comUso } from "./uso";
-import { digitando, enviarDocumento, enviarTexto, marcarComoLida, type MensagemRecebida } from "./whatsapp";
+import { gerarMensagemDeVoz, precisaDoTexto, responderEmAudio } from "./voz";
+import { digitando, enviarAudio, enviarDocumento, enviarTexto, gravando, marcarComoLida, type MensagemRecebida } from "./whatsapp";
 
 const DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 const limitador = new LimitadorPorMinuto(15);
@@ -54,6 +55,7 @@ O QUE VOCÊ FAZ (usando as ferramentas):
 - Contas a pagar: contas fixas (todo mês: aluguel, luz, internet...) e avulsas (boleto, IPVA); listar o que falta pagar, marcar como paga (já lança o gasto), desfazer, mudar valor do mês, ignorar um mês, pausar conta fixa. O robô avisa sozinho antes do vencimento, no dia e depois, enquanto não estiver paga.
 - Agenda pessoal (Google Agenda): ver compromissos ("o que tenho amanhã?"), marcar, mudar de dia/horário e cancelar compromissos. O robô avisa sozinho antes de cada compromisso. Marcar/mudar/cancelar só funciona se a agenda foi conectada pelo botão "Conectar com Google" (se a ferramenta disser que não, explique e ofereça um lembrete no WhatsApp no lugar).
 - E-mail pessoal (Gmail, só leitura): o robô lê os e-mails novos, avisa na hora os urgentes e manda o resumo da manhã; você lista e procura e-mails e cria regras ("fulano é sempre importante" = criar_regra_email importante; "ignora e-mails da loja X" = ignorar). Você só tem remetente, assunto e um resumo curto, nunca o texto completo; não responde nem apaga e-mails. Se não estiverem conectados, oriente: site → Minha conta → Conexões.
+- Responder em áudio: a pessoa escolhe se as respostas vêm por escrito, em áudio quando ela manda áudio (padrão) ou sempre em áudio (respostas_em_audio). As suas respostas podem virar mensagem de voz: prefira frases curtas e naturais, sem tabelas.
 - Passagens aéreas (Google Flights): buscar agora com datas fixas (buscar_passagens), achar as datas mais baratas numa janela (datas_baratas_passagem) e criar vigias com preço-alvo: o robô consulta algumas vezes por dia e avisa aqui quando o preço ficar abaixo do alvo. Listar, mudar o alvo, pausar e apagar vigias. Você NÃO compra passagem: manda o link. Cada busca gasta uma cota mensal: não repita buscas à toa.
 - Grupos (espaços compartilhados): você pode ser colocado num grupo do WhatsApp; lá guarda o que os membros mandam e responde quando é marcado com @. Para ligar um grupo: no site, menu Espaços, criar o espaço, gerar o código e mandar o código no grupo marcando você. O que é do grupo não aparece aqui no privado (e vice-versa).
 Em breve (ainda NÃO disponível, diga que está chegando): foto de boleto virar conta a pagar, comprovante marcar conta como paga, nota fiscal virar despesa sozinha, decisões e relatórios em PDF.
@@ -147,7 +149,21 @@ async function atender(m: MensagemRecebida, usuario: banco.Usuario) {
     });
 
     const final = limitarEmojis(resposta || "Pode repetir de outro jeito?");
-    await responder(m, prefixo + final);
+    let foiEmAudio = false;
+    if (responderEmAudio(usuario.respostas_em_audio, m.tipo)) {
+      try {
+        await gravando(m.jidResposta);
+        const voz = await gerarMensagemDeVoz(final);
+        if (voz) {
+          await enviarAudio(m.jidResposta, m.digitos, voz.ogg, voz.segundos);
+          foiEmAudio = true;
+        }
+      } catch (e) {
+        log.aviso("resposta em áudio não saiu (vai por escrito):", (e as Error).message.slice(0, 200));
+      }
+    }
+    if (!foiEmAudio) await responder(m, prefixo + final);
+    else if (precisaDoTexto(final)) await responder(m, final);
     await banco.salvarMensagem(usuario.id, "usuario", texto);
     await banco.salvarMensagem(usuario.id, "assistente", final);
   } catch (e) {

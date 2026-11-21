@@ -1609,6 +1609,31 @@ export function criarFerramentas(ctx: Contexto): Ferramenta[] {
       },
     },
 
+
+    // ============================================================ áudio
+    {
+      nome: "respostas_em_audio",
+      descricao:
+        "Muda como você responde: 'nunca' (sempre por escrito), 'quando_audio' (em áudio quando a pessoa manda áudio) " +
+        "ou 'sempre' (sempre em áudio). Use quando a pessoa pedir, ex.: 'responde só por escrito', 'pode responder em áudio'.",
+      parametros: {
+        type: "object",
+        properties: { modo: { type: "string", enum: ["nunca", "quando_audio", "sempre"] } },
+        required: ["modo"],
+      },
+      executar: async (a) => {
+        const modo = a.modo === "nunca" || a.modo === "sempre" || a.modo === "quando_audio" ? a.modo : null;
+        if (!modo) return { resultado: "NÃO GRAVADO: modo inválido" };
+        await banco.definirRespostasEmAudio(uid, modo);
+        ctx.usuario.respostas_em_audio = modo;
+        return {
+          resultado: "GRAVADO",
+          agora:
+            modo === "nunca" ? "sempre por escrito" : modo === "sempre" ? "sempre em áudio (links e listas também por escrito)" : "em áudio quando a pessoa mandar áudio",
+          observacao: "Também dá para mudar no site, em Minha conta.",
+        };
+      },
+    },
     // ============================================================ passagens
     {
       nome: "buscar_passagens",

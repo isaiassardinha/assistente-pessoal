@@ -46,6 +46,8 @@ export async function salvarAvisosPessoais(_a: EstadoFormulario, f: FormData): P
   const silencioInicio = n("silencio_inicio");
   const silencioFim = n("silencio_fim");
   const resumo = campo(f, "resumo") === "sim";
+  const audio = campo(f, "audio") || "quando_audio";
+  if (audio !== "nunca" && audio !== "quando_audio" && audio !== "sempre") return { erro: ERRO_GENERICO };
   const ok =
     [minutos, hora, silencioInicio, silencioFim].every(Number.isInteger) &&
     minutos >= 0 && minutos <= 120 && hora >= 5 && hora <= 11 &&
@@ -59,6 +61,7 @@ export async function salvarAvisosPessoais(_a: EstadoFormulario, f: FormData): P
       resumo_manha_hora: hora,
       silencio_inicio: silencioInicio,
       silencio_fim: silencioFim,
+      respostas_em_audio: audio,
     })
     .eq("id", usuarioId);
   if (error) return { erro: ERRO_GENERICO };

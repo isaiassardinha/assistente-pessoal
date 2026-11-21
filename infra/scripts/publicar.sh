@@ -31,6 +31,11 @@ log() { echo "[$(date '+%F %T')] $*"; }
 como() { runuser -u "$USUARIO" -- "$@"; }
 
 mkdir -p "$ESTADO"
+# ffmpeg: converte a voz das respostas em áudio para o formato do WhatsApp
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  log "Instalando o ffmpeg (uma vez só)"
+  { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg; } >/dev/null 2>&1 || log "AVISO: não deu para instalar o ffmpeg agora"
+fi
 como git -C "$REPO" fetch -q origin main
 NOVA="$(como git -C "$REPO" rev-parse origin/main)"
 NO_AR="$(cat "$ESTADO/versao-no-ar" 2>/dev/null || true)"

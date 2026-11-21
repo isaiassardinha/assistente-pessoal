@@ -29,7 +29,7 @@ timedatectl set-timezone America/Sao_Paulo
 passo "Atualizando o sistema (pode levar alguns minutos)"
 apt-get update -q
 apt-get -y -q -o Dpkg::Options::="--force-confold" upgrade
-apt-get install -y -q curl ca-certificates gnupg git ufw fail2ban unattended-upgrades \
+apt-get install -y -q curl ca-certificates gnupg git ufw fail2ban unattended-upgrades ffmpeg \
   debian-keyring debian-archive-keyring apt-transport-https
 
 passo "Atualizações automáticas de segurança"

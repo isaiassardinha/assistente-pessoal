@@ -42,6 +42,12 @@ decisões, documentos e relatórios. Cada pessoa só vê os próprios dados.
   - site: menu Passagens (criar, mudar alvo, pausar, apagar, histórico de preços)
   - testes: `robo/src/passagens.test.ts`, `robo/src/ferramentasPassagens.test.ts`, seção 10b dos testes de segurança
 
+- **Respostas em áudio** (voz do Gemini, `GEMINI_VOZ_MODELO` / `GEMINI_VOZ` opcionais)
+  - padrão: áudio quando a pessoa manda áudio; Minha conta ou WhatsApp mudam para "sempre" ou "nunca"
+  - links, listas e muitos valores também vão por escrito; resposta longa vai só por escrito
+  - precisa do `ffmpeg` no servidor (a publicação instala sozinha); `/api/saude` mostra `voz`
+  - testes: `robo/src/voz.test.ts`, seção 10c dos testes de segurança
+
 ## Rodar os testes de segurança
 
 - No computador/servidor com Postgres: `bash scripts/testar-banco.sh`

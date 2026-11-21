@@ -296,6 +296,22 @@ export async function enviarDocumento(destino: string, digitosDoDestino: string,
   await sock.sendMessage(destino, { document: arquivo, fileName: nome, mimetype: mime, caption: legenda });
 }
 
+/** Mensagem de voz (ogg/opus), como um áudio gravado no WhatsApp. */
+export async function enviarAudio(destino: string, digitosDoDestino: string, ogg: Buffer, segundos: number): Promise<void> {
+  if (!sock || !conectado()) throw new Error("WhatsApp não está conectado");
+  if (!numeroPermitido(digitosDoDestino, config.numerosPermitidos)) throw new Error("número fora da lista de números liberados");
+  await sock.sendMessage(destino, { audio: ogg, mimetype: "audio/ogg; codecs=opus", ptt: true, seconds: segundos });
+}
+
+/** Mostra "gravando áudio…" para a pessoa. */
+export async function gravando(jid: string) {
+  try {
+    await sock?.sendPresenceUpdate("recording", jid);
+  } catch {
+    // não é importante
+  }
+}
+
 /** Mostra "digitando…" para a pessoa enquanto o robô pensa. */
 export async function digitando(jid: string, ligado: boolean) {
   try {

@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import * as banco from "./banco";
 import { log } from "./log";
 
-export type TipoUso = "conversa" | "audio" | "leitura" | "resumo" | "vetores" | "pergunta" | "autoteste" | "email";
+export type TipoUso = "conversa" | "audio" | "leitura" | "resumo" | "vetores" | "pergunta" | "autoteste" | "email" | "voz";
 
 /**
  * Preço de tabela do Gemini (US$ por 1 milhão de tokens), conferido em
@@ -16,6 +16,9 @@ export type TipoUso = "conversa" | "audio" | "leitura" | "resumo" | "vetores" | 
 export const PRECOS: Record<string, { entrada: number; saida: number; audio?: number }> = {
   "gemini-3.1-flash-lite": { entrada: 0.25, saida: 1.5, audio: 0.5 },
   "gemini-embedding-2": { entrada: 0.2, saida: 0 },
+  // voz (TTS): saída em tokens de áudio; preço de tabela estimado
+  "gemini-3.1-flash-tts-preview": { entrada: 0.5, saida: 10 },
+  "gemini-2.5-flash-preview-tts": { entrada: 0.5, saida: 10 },
 };
 const PADRAO = PRECOS["gemini-3.1-flash-lite"];
 

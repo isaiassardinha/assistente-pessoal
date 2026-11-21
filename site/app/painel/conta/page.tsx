@@ -224,6 +224,16 @@ export default async function MinhaConta({ searchParams }: PageProps<"/painel/co
                   opcoes={[0, 5, 10, 15, 30, 45, 60, 120].map((n) => ({ valor: String(n), rotulo: n === 0 ? "Não avisar" : n < 60 ? `${n} minutos antes` : `${n / 60} hora(s) antes` }))}
                   defaultValue={String(perfil.agenda_aviso_minutos)}
                 />
+                <Selecao
+                  rotulo="Respostas do robô"
+                  name="audio"
+                  opcoes={[
+                    { valor: "quando_audio", rotulo: "Em áudio quando eu mandar áudio" },
+                    { valor: "sempre", rotulo: "Sempre em áudio" },
+                    { valor: "nunca", rotulo: "Sempre por escrito" },
+                  ]}
+                  defaultValue={perfil.respostas_em_audio ?? "quando_audio"}
+                />
                 <div className="grid grid-cols-2 gap-3">
                   <Selecao rotulo="Silêncio a partir de" name="silencio_inicio" opcoes={opcoes(18, 23, (n) => `${n}h`)} defaultValue={String(perfil.silencio_inicio)} />
                   <Selecao rotulo="até" name="silencio_fim" opcoes={opcoes(5, 10, (n) => `${n}h`)} defaultValue={String(perfil.silencio_fim)} />
@@ -231,6 +241,7 @@ export default async function MinhaConta({ searchParams }: PageProps<"/painel/co
               </div>
               <p className="text-xs text-zinc-500">
                 No silêncio, e-mails urgentes ficam guardados e chegam de manhã. Avisos de compromisso e lembretes que você mesmo marcou chegam sempre.
+                Respostas em áudio: links, listas e valores também vão por escrito.
               </p>
             </FormularioAcao>
           </div>
