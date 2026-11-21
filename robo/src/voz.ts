@@ -93,10 +93,36 @@ export function pcmParaOgg(pcm: Buffer, taxa: number): Promise<Buffer> {
   });
 }
 
+let ultimaFalha: { motivo: string; em: string } | null = null;
+let ultimoSucesso: string | null = null;
+
+/** Para a página de saúde: o que aconteceu na última tentativa de responder em áudio. */
+export function situacaoVoz(): string {
+  if (!ffmpegDisponivel()) return "falta o ffmpeg no servidor";
+  if (ultimaFalha && (!ultimoSucesso || ultimaFalha.em > ultimoSucesso)) return `falhou em ${ultimaFalha.em}: ${ultimaFalha.motivo}`;
+  return ultimoSucesso ? `ok (último áudio em ${ultimoSucesso})` : "ok (nenhum áudio enviado ainda)";
+}
+
+export function registrarFalhaDeVoz(motivo: string) {
+  ultimaFalha = { motivo: motivo.slice(0, 300), em: new Date().toISOString() };
+}
+
+export function registrarAudioEnviado() {
+  ultimoSucesso = new Date().toISOString();
+}
+
 /** Gera a mensagem de voz. Devolve null se não der (aí a resposta vai por escrito). */
 export async function gerarMensagemDeVoz(texto: string): Promise<{ ogg: Buffer; segundos: number } | null> {
   const fala = textoParaFala(texto);
-  if (!fala || fala.length > MAXIMO_FALA || !ffmpegDisponivel()) return null;
+  if (!fala) return null;
+  if (fala.length > MAXIMO_FALA) {
+    registrarFalhaDeVoz(`resposta longa demais para áudio (${fala.length} letras)`);
+    return null;
+  }
+  if (!ffmpegDisponivel()) {
+    registrarFalhaDeVoz("falta o ffmpeg no servidor");
+    return null;
+  }
   const { pcm, taxa } = await falar(fala);
   const ogg = await pcmParaOgg(pcm, taxa);
   return { ogg, segundos: Math.max(1, Math.round(pcm.length / 2 / taxa)) };

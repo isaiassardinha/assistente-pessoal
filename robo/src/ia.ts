@@ -149,29 +149,35 @@ export async function transcreverAudio(audio: Buffer, mime: string): Promise<str
  */
 export async function falar(texto: string): Promise<{ pcm: Buffer; taxa: number }> {
   const modelos = [...new Set([config.geminiVozModelo, "gemini-2.5-flash-preview-tts"])];
+  // com e sem instrução de estilo (alguns modelos de voz recusam instrução e só aceitam o texto a falar)
+  const tentativas = modelos.flatMap((modelo) => [
+    { modelo, texto: `Fale em português do Brasil, em tom natural e simpático: ${texto}` },
+    { modelo, texto },
+  ]);
   let ultimoErro: unknown;
-  for (const modelo of modelos) {
+  for (const t of tentativas) {
     try {
       const resposta = await ia().models.generateContent({
-        model: modelo,
-        contents: [{ role: "user", parts: [{ text: `Fale em português do Brasil, em tom natural, simpático e no ritmo de uma conversa: ${texto}` }] }],
+        model: t.modelo,
+        contents: [{ role: "user", parts: [{ text: t.texto }] }],
         config: {
           responseModalities: ["AUDIO"],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.geminiVoz } } },
         },
       });
-      registrarUso("voz", modelo, usoDaResposta(resposta));
+      registrarUso("voz", t.modelo, usoDaResposta(resposta));
       const parte = resposta.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
-      if (!parte?.inlineData?.data) throw new Error("a voz veio vazia");
+      if (!parte?.inlineData?.data) throw new Error(`a voz veio vazia (${resposta.candidates?.[0]?.finishReason ?? "sem motivo"})`);
       const taxa = Number(/rate=(\d+)/.exec(parte.inlineData.mimeType ?? "")?.[1] ?? 24000);
       return { pcm: Buffer.from(parte.inlineData.data, "base64"), taxa };
     } catch (e) {
       ultimoErro = e;
-      const msg = String((e as Error)?.message ?? e);
-      if (!/not found|404|not supported|unknown model/i.test(msg)) break; // só troca de modelo se este não existir
+      const status = (e as { status?: number })?.status;
+      if (status === 429) break; // cota: não adianta tentar outro jeito agora
     }
   }
-  throw traduzirErro(ultimoErro);
+  const msg = String((ultimoErro as Error)?.message ?? ultimoErro).replace(/key=[^&\s]+/gi, "key=…");
+  throw new Error(`voz do Gemini: ${msg.slice(0, 300)}`);
 }
 
 // =====================================================================

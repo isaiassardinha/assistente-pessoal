@@ -17,7 +17,7 @@ import { compromissosDe, conectarAgenda, conectarGmail, conectarGoogleAgenda, Co
 import { acordarCerebro } from "./rotinas";
 import { apagarDocumentos, apagarEspaco, ArquivoIndisponivel, baixarDocumento, buscarNoEspaco, conectarDriveEspaco } from "./espacos";
 import { situacaoPassagens } from "./passagens";
-import { ffmpegDisponivel } from "./voz";
+import { situacaoVoz } from "./voz";
 import { comUso } from "./uso";
 import { conectado, desconectar, enviarTexto, estadoWhatsApp, NumeroSemWhatsApp } from "./whatsapp";
 
@@ -127,7 +127,7 @@ export function iniciarApiInterna() {
           faltando: configuracoesFaltando(),
           ia: resultadoAutoteste(),
           passagens: await situacaoPassagens(),
-          voz: ffmpegDisponivel() ? "ok" : "falta o ffmpeg no servidor",
+          voz: situacaoVoz(),
         });
       }
       if (!autorizado(req)) return json(res, 401, { ok: false, erro: "não autorizado" });
