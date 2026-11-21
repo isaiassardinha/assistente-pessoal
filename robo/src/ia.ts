@@ -29,6 +29,13 @@ function ia(): GoogleGenAI {
   return cliente;
 }
 
+// A configuração de voz (speechConfig) só existe na v1beta da API; o pacote usa v1 por padrão.
+let clienteVoz: GoogleGenAI | null = null;
+function iaVoz(): GoogleGenAI {
+  clienteVoz ??= new GoogleGenAI({ apiKey: config.geminiChave, apiVersion: "v1beta" });
+  return clienteVoz;
+}
+
 function traduzirErro(e: unknown): Error {
   const texto = String((e as Error)?.message ?? e);
   const status = (e as { status?: number })?.status;
@@ -157,7 +164,7 @@ export async function falar(texto: string): Promise<{ pcm: Buffer; taxa: number 
   let ultimoErro: unknown;
   for (const t of tentativas) {
     try {
-      const resposta = await ia().models.generateContent({
+      const resposta = await iaVoz().models.generateContent({
         model: t.modelo,
         contents: [{ role: "user", parts: [{ text: t.texto }] }],
         config: {
