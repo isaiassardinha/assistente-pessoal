@@ -9,7 +9,7 @@ import { config, configuracoesFaltando, versao } from "./config";
 import { log } from "./log";
 import { resultadoAutoteste } from "./autoteste";
 import { buscar } from "./cerebro";
-import { IaIndisponivel, responderComFontes } from "./ia";
+import { IaIndisponivel, responderComFontes, situacaoInstabilidade } from "./ia";
 import { gerarCodigo, hashCodigo, LimitadorPorMinuto, numeroPermitido } from "./regras";
 import { emailValido, senhaDeAppValida } from "./email";
 import { redirectUriValido } from "./googleAgenda";
@@ -125,7 +125,7 @@ export function iniciarApiInterna() {
           versao: versao(),
           whatsapp: e.situacao,
           faltando: configuracoesFaltando(),
-          ia: resultadoAutoteste(),
+          ia: { ...resultadoAutoteste(), instabilidade: situacaoInstabilidade() },
           passagens: await situacaoPassagens(),
           voz: situacaoVoz(),
         });

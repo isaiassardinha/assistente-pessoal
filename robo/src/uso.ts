@@ -15,6 +15,8 @@ export type TipoUso = "conversa" | "audio" | "leitura" | "resumo" | "vetores" | 
  */
 export const PRECOS: Record<string, { entrada: number; saida: number; audio?: number }> = {
   "gemini-3.1-flash-lite": { entrada: 0.25, saida: 1.5, audio: 0.5 },
+  // reserva (só quando o principal falha)
+  "gemini-3.5-flash-lite": { entrada: 0.3, saida: 2.5, audio: 0.3 },
   "gemini-embedding-2": { entrada: 0.2, saida: 0 },
   // voz (TTS): saída em tokens de áudio; preço de tabela estimado
   "gemini-3.1-flash-tts-preview": { entrada: 0.5, saida: 10 },

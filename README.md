@@ -47,6 +47,8 @@ decisões, documentos e relatórios. Cada pessoa só vê os próprios dados.
   - links, listas e muitos valores também vão por escrito; resposta longa vai só por escrito
   - precisa do `ffmpeg` no servidor (a publicação instala sozinha); `/api/saude` mostra `voz`
   - testes: `robo/src/voz.test.ts`, seção 10c dos testes de segurança
+- **IA com reserva**: falha passageira do Gemini é repetida e, se o modelo principal (`GEMINI_MODELO`) não responder, vai o reserva (`GEMINI_MODELO_RESERVA`, padrão `gemini-3.5-flash-lite`; `nenhum` desliga). Em `/api/saude` → `robo.ia.instabilidade`.
+  - testes: `robo/src/ia.test.ts`
 
 ## Rodar os testes de segurança
 

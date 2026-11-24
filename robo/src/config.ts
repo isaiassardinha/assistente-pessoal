@@ -13,6 +13,8 @@ export const config = {
   supabaseChaveSecreta: opcional("SUPABASE_SECRET_KEY"),
   geminiChave: opcional("GEMINI_API_KEY"),
   geminiModelo: opcional("GEMINI_MODELO") || "gemini-3.1-flash-lite",
+  /** Modelo reserva: usado quando o principal está sobrecarregado ou sem cota. "nenhum" desliga. */
+  geminiModeloReserva: ((v) => (/^(nenhum|off|-)$/i.test(v) ? "" : v || "gemini-3.5-flash-lite"))(opcional("GEMINI_MODELO_RESERVA")),
   /** Voz das respostas em áudio (Gemini TTS). */
   geminiVozModelo: opcional("GEMINI_VOZ_MODELO") || "gemini-3.1-flash-tts-preview",
   geminiVoz: opcional("GEMINI_VOZ") || "Charon",
